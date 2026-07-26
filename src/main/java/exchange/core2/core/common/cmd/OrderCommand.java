@@ -121,6 +121,23 @@ public final class OrderCommand implements IOrder {
         return cmd;
     }
 
+    public static OrderCommand replace(
+            final long orderId,
+            final long uid,
+            final long price,
+            final long reserveBidPrice,
+            final long quantity) {
+        final OrderCommand cmd = new OrderCommand();
+        cmd.command = OrderCommandType.REPLACE_ORDER;
+        cmd.orderId = orderId;
+        cmd.uid = uid;
+        cmd.price = price;
+        cmd.reserveBidPrice = reserveBidPrice;
+        cmd.size = quantity;
+        cmd.resultCode = CommandResultCode.VALID_FOR_MATCHING_ENGINE;
+        return cmd;
+    }
+
     /**
      * Handles full MatcherTradeEvent chain, without removing/revoking them
      *

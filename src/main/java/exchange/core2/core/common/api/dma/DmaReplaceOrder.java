@@ -5,31 +5,22 @@ import exchange.core2.core.common.OrderAction;
 import java.util.Objects;
 
 /**
- * Immutable direct-market-access request for a GTC limit order.
+ * Atomically replaces the price and total quantity of a live DMA limit order.
+ *
+ * <p>The new total quantity includes quantities already filled. The matcher
+ * rejects the replacement without changing the order when
+ * {@code newQuantity <= cumulativeFilledQuantity}.</p>
  */
-public record DmaLimitOrder(
+public record DmaReplaceOrder(
         long deliveryId,
         long orderId,
         long clientId,
         int symbol,
         OrderAction side,
-        long price,
-        long quantity) implements DmaNewOrder {
+        long newPrice,
+        long newQuantity) implements DmaDeliveryRequest {
 
-    /**
-     * Uses the order identifier as the delivery identifier.
-     */
-    public DmaLimitOrder(
-            final long orderId,
-            final long clientId,
-            final int symbol,
-            final OrderAction side,
-            final long price,
-            final long quantity) {
-        this(orderId, orderId, clientId, symbol, side, price, quantity);
-    }
-
-    public DmaLimitOrder {
+    public DmaReplaceOrder {
         if (deliveryId <= 0) {
             throw new IllegalArgumentException("deliveryId must be positive");
         }
@@ -43,11 +34,11 @@ public record DmaLimitOrder(
             throw new IllegalArgumentException("symbol must not be negative");
         }
         Objects.requireNonNull(side, "side");
-        if (price <= 0) {
-            throw new IllegalArgumentException("price must be positive");
+        if (newPrice <= 0) {
+            throw new IllegalArgumentException("newPrice must be positive");
         }
-        if (quantity <= 0) {
-            throw new IllegalArgumentException("quantity must be positive");
+        if (newQuantity <= 0) {
+            throw new IllegalArgumentException("newQuantity must be positive");
         }
     }
 }

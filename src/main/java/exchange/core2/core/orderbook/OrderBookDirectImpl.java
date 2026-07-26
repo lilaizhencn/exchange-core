@@ -442,6 +442,38 @@ public final class OrderBookDirectImpl implements IOrderBook {
         return CommandResultCode.SUCCESS;
     }
 
+    @Override
+    public CommandResultCode replaceOrder(final OrderCommand cmd) {
+
+        final DirectOrder orderToReplace = orderIdIndex.get(cmd.orderId);
+        if (orderToReplace == null || orderToReplace.uid != cmd.uid) {
+            return CommandResultCode.MATCHING_UNKNOWN_ORDER_ID;
+        }
+        if (cmd.action != orderToReplace.action) {
+            return CommandResultCode.MATCHING_REPLACE_FAILED_DIFFERENT_SIDE;
+        }
+        if (cmd.size <= orderToReplace.filled) {
+            return CommandResultCode.MATCHING_REPLACE_FAILED_INVALID_QUANTITY;
+        }
+
+        final Bucket freeBucket = removeOrder(orderToReplace);
+        orderToReplace.price = cmd.price;
+        orderToReplace.size = cmd.size;
+        orderToReplace.reserveBidPrice = cmd.reserveBidPrice;
+        cmd.action = orderToReplace.getAction();
+
+        final long filled = tryMatchInstantly(orderToReplace, cmd);
+        if (filled == orderToReplace.size) {
+            orderIdIndex.remove(cmd.orderId);
+            objectsPool.put(ObjectsPool.DIRECT_ORDER, orderToReplace);
+            return CommandResultCode.SUCCESS;
+        }
+
+        orderToReplace.filled = filled;
+        insertOrder(orderToReplace, freeBucket);
+        return CommandResultCode.SUCCESS;
+    }
+
 
     private Bucket removeOrder(final DirectOrder order) {
 

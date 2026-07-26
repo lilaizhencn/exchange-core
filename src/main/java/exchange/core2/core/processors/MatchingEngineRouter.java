@@ -172,6 +172,7 @@ public final class MatchingEngineRouter implements WriteBytesMarshallable {
         final OrderCommandType command = cmd.command;
 
         if (command == OrderCommandType.MOVE_ORDER
+                || command == OrderCommandType.REPLACE_ORDER
                 || command == OrderCommandType.CANCEL_ORDER
                 || command == OrderCommandType.PLACE_ORDER
                 || command == OrderCommandType.REDUCE_ORDER

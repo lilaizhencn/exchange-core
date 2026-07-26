@@ -8,7 +8,7 @@ import java.util.Objects;
  * Immutable lifecycle projection for one DMA order.
  */
 public record DmaOrderState(
-        DmaLimitOrder order,
+        DmaNewOrder order,
         DmaOrderStatus status,
         long filledQuantity,
         long cancelledQuantity,
@@ -26,7 +26,7 @@ public record DmaOrderState(
                 Math.addExact(filledQuantity, cancelledQuantity),
                 Math.addExact(rejectedQuantity, remainingQuantity));
         if (accountedQuantity != order.quantity()) {
-            throw new IllegalArgumentException("lifecycle quantities must equal the original order quantity");
+            throw new IllegalArgumentException("lifecycle quantities must equal the current order quantity");
         }
         if (version < 0) {
             throw new IllegalArgumentException("version must not be negative");
@@ -40,7 +40,7 @@ public record DmaOrderState(
                 version);
     }
 
-    public static DmaOrderState initial(final DmaLimitOrder order) {
+    public static DmaOrderState initial(final DmaNewOrder order) {
         return new DmaOrderState(order, DmaOrderStatus.NEW, 0, 0, 0, order.quantity(), 0);
     }
 
@@ -127,6 +127,51 @@ public record DmaOrderState(
                 version + 1);
     }
 
+    /**
+     * Applies a successful atomic price/total-quantity replacement and any
+     * trades caused by its new price.
+     */
+    public DmaOrderState applyReplaceResult(
+            final DmaReplaceOrder replacement,
+            final DmaOrderResult result) {
+        Objects.requireNonNull(replacement, "replacement");
+        requireResultOrder(result);
+        requireOwner(replacement);
+        if (!(order instanceof DmaLimitOrder limitOrder)) {
+            throw new IllegalStateException("only live limit orders can be replaced");
+        }
+        if (result.resultCode() != CommandResultCode.SUCCESS) {
+            return this;
+        }
+        if (result.cancelledQuantity() != 0 || result.rejectedQuantity() != 0) {
+            throw new IllegalArgumentException("successful replacement must contain only trade events");
+        }
+
+        long newlyFilled = 0L;
+        for (final DmaFill fill : result.fills()) {
+            newlyFilled = Math.addExact(newlyFilled, fill.quantity());
+        }
+        final long nextFilled = Math.addExact(filledQuantity, newlyFilled);
+        final long nextRemaining = Math.subtractExact(replacement.newQuantity(), nextFilled);
+        final DmaLimitOrder replacedOrder = new DmaLimitOrder(
+                limitOrder.deliveryId(),
+                limitOrder.orderId(),
+                limitOrder.clientId(),
+                limitOrder.symbol(),
+                limitOrder.side(),
+                replacement.newPrice(),
+                replacement.newQuantity());
+
+        return new DmaOrderState(
+                replacedOrder,
+                statusFor(nextFilled, 0, 0, nextRemaining),
+                nextFilled,
+                0,
+                0,
+                nextRemaining,
+                version + 1);
+    }
+
     private long remainingAfter(
             final long filled,
             final long cancelled,
@@ -140,6 +185,15 @@ public record DmaOrderState(
         Objects.requireNonNull(result, "result");
         if (result.orderId() != order.orderId()) {
             throw new IllegalArgumentException("command result does not belong to lifecycle order " + order.orderId());
+        }
+    }
+
+    private void requireOwner(final DmaReplaceOrder replacement) {
+        if (replacement.orderId() != order.orderId()
+                || replacement.clientId() != order.clientId()
+                || replacement.symbol() != order.symbol()
+                || replacement.side() != order.side()) {
+            throw new IllegalArgumentException("replacement does not own lifecycle order " + order.orderId());
         }
     }
 

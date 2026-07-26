@@ -77,6 +77,14 @@ public interface IOrderBook extends WriteBytesMarshallable, StateHash {
      */
     CommandResultCode moveOrder(OrderCommand cmd);
 
+    /**
+     * Atomically replace an order's price and total quantity.
+     *
+     * @param cmd command containing the new price, reserve price and total size
+     * @return failure without mutation, or SUCCESS after the replacement
+     */
+    CommandResultCode replaceOrder(OrderCommand cmd);
+
     // testing only ?
     int getOrdersNum(OrderAction action);
 
@@ -180,6 +188,12 @@ public interface IOrderBook extends WriteBytesMarshallable, StateHash {
         if (commandType == OrderCommandType.MOVE_ORDER) {
 
             return orderBook.moveOrder(cmd);
+
+        } else if (commandType == OrderCommandType.REPLACE_ORDER) {
+
+            return cmd.resultCode == CommandResultCode.VALID_FOR_MATCHING_ENGINE
+                    ? orderBook.replaceOrder(cmd)
+                    : cmd.resultCode;
 
         } else if (commandType == OrderCommandType.CANCEL_ORDER) {
 

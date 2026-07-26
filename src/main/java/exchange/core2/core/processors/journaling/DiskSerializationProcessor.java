@@ -291,6 +291,30 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
 
             if (debug) log.debug("move order seq={} t={} orderId={} symbol={} uid={} price={}", baseSeq + dSeq, cmd.timestamp, cmd.orderId, cmd.symbol, cmd.uid, cmd.price);
 
+        } else if (cmdType == OrderCommandType.REPLACE_ORDER) {
+
+            buffer.putLong(cmd.uid);
+            buffer.putInt(cmd.symbol);
+            buffer.putLong(cmd.orderId);
+            buffer.putLong(cmd.price);
+            buffer.putLong(cmd.reserveBidPrice);
+            buffer.putLong(cmd.size);
+            buffer.put(cmd.action.getCode());
+
+            if (debug) {
+                log.debug(
+                        "replace order seq={} t={} orderId={} symbol={} uid={} price={} reserve={} size={} side={}",
+                        baseSeq + dSeq,
+                        cmd.timestamp,
+                        cmd.orderId,
+                        cmd.symbol,
+                        cmd.uid,
+                        cmd.price,
+                        cmd.reserveBidPrice,
+                        cmd.size,
+                        cmd.action);
+            }
+
         } else if (cmdType == OrderCommandType.CANCEL_ORDER) {
 
             buffer.putLong(cmd.uid); // 8 bytes can be compressed as dictionary
@@ -525,6 +549,42 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
                     if (debug) log.debug("move order seq={} t={} orderId={} symbol={} uid={} price={}", lastSeq, timestampNs, orderId, symbol, uid, price);
 
                     api.moveOrder(serviceFlags, eventsGroup, timestampNs, price, orderId, symbol, uid);
+
+                } else if (cmdType == OrderCommandType.REPLACE_ORDER) {
+
+                    final long uid = jr.readLong();
+                    final int symbol = jr.readInt();
+                    final long orderId = jr.readLong();
+                    final long price = jr.readLong();
+                    final long reserveBidPrice = jr.readLong();
+                    final long quantity = jr.readLong();
+                    final OrderAction side = OrderAction.of(jr.readByte());
+
+                    if (debug) {
+                        log.debug(
+                                "replace order seq={} t={} orderId={} symbol={} uid={} price={} reserve={} size={} side={}",
+                                lastSeq,
+                                timestampNs,
+                                orderId,
+                                symbol,
+                                uid,
+                                price,
+                                reserveBidPrice,
+                                quantity,
+                                side);
+                    }
+
+                    api.replaceOrder(
+                            serviceFlags,
+                            eventsGroup,
+                            timestampNs,
+                            price,
+                            reserveBidPrice,
+                            quantity,
+                            side,
+                            orderId,
+                            symbol,
+                            uid);
 
                 } else if (cmdType == OrderCommandType.CANCEL_ORDER) {
 

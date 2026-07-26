@@ -7,9 +7,12 @@ import exchange.core2.core.common.api.dma.DmaFill;
 import exchange.core2.core.common.api.dma.DmaLifecycleResult;
 import exchange.core2.core.common.api.dma.DmaLifecycleSnapshot;
 import exchange.core2.core.common.api.dma.DmaLimitOrder;
+import exchange.core2.core.common.api.dma.DmaNewOrder;
 import exchange.core2.core.common.api.dma.DmaOrderResult;
 import exchange.core2.core.common.api.dma.DmaOrderState;
 import exchange.core2.core.common.api.dma.DmaOrderStatus;
+import exchange.core2.core.common.api.dma.DmaProtectedMarketOrder;
+import exchange.core2.core.common.api.dma.DmaReplaceOrder;
 import exchange.core2.core.common.cmd.CommandResultCode;
 
 import java.util.Comparator;
@@ -19,14 +22,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 /**
  * Thread-safe DMA lifecycle projection and idempotent delivery boundary.
  *
  * <p>The exchange ring buffer remains the command linearization point. This
  * service records that order in immutable lifecycle states, updates resting
- * maker orders from taker fills, and delays cancellation while submission is
- * still pending.</p>
+ * maker orders from taker fills, and orders cancel/replace mutations behind a
+ * still-pending submission.</p>
  */
 public final class DmaOrderLifecycleService {
 
@@ -47,8 +51,28 @@ public final class DmaOrderLifecycleService {
      */
     public CompletableFuture<DmaLifecycleResult> submit(final DmaLimitOrder request) {
         Objects.requireNonNull(request, "request");
-        final DeliveryKey key = DeliveryKey.submit(request.deliveryId());
+        return submitNewOrder(
+                request,
+                DeliveryKey.submitLimit(request.deliveryId()),
+                () -> exchangeApi.submitDmaLimitOrder(request));
+    }
 
+    /**
+     * Submits a protected market IOC once for a stable delivery identifier.
+     */
+    public CompletableFuture<DmaLifecycleResult> submitProtected(
+            final DmaProtectedMarketOrder request) {
+        Objects.requireNonNull(request, "request");
+        return submitNewOrder(
+                request,
+                DeliveryKey.submitProtected(request.deliveryId()),
+                () -> exchangeApi.submitDmaProtectedMarketOrder(request));
+    }
+
+    private CompletableFuture<DmaLifecycleResult> submitNewOrder(
+            final DmaNewOrder request,
+            final DeliveryKey key,
+            final Supplier<CompletableFuture<DmaOrderResult>> publisher) {
         synchronized (lock) {
             final CompletableFuture<DmaLifecycleResult> duplicate = duplicateDelivery(key, request);
             if (duplicate != null) {
@@ -64,7 +88,7 @@ public final class DmaOrderLifecycleService {
             submissionsByOrder.put(request.orderId(), lifecycleFuture);
 
             try {
-                exchangeApi.submitDmaLimitOrder(request)
+                publisher.get()
                         .whenComplete((result, error) ->
                                 completeSubmit(key, request, lifecycleFuture, result, error));
             } catch (final RuntimeException error) {
@@ -113,9 +137,57 @@ public final class DmaOrderLifecycleService {
         } else {
             pendingSubmit.whenComplete((ignored, submitError) -> {
                 if (submitError != null) {
-                    failCancel(key, lifecycleFuture, submitError);
+                    failDelivery(key, lifecycleFuture, submitError);
                 } else {
                     dispatchCancel(key, request, lifecycleFuture);
+                }
+            });
+        }
+
+        return lifecycleFuture;
+    }
+
+    /**
+     * Atomically replaces price and total quantity. A replacement arriving
+     * while submission is pending is published after the submit result.
+     */
+    public CompletableFuture<DmaLifecycleResult> replace(final DmaReplaceOrder request) {
+        Objects.requireNonNull(request, "request");
+        final DeliveryKey key = DeliveryKey.replace(request.deliveryId());
+        final CompletableFuture<DmaLifecycleResult> lifecycleFuture;
+        final CompletableFuture<DmaLifecycleResult> pendingSubmit;
+
+        synchronized (lock) {
+            final CompletableFuture<DmaLifecycleResult> duplicate = duplicateDelivery(key, request);
+            if (duplicate != null) {
+                return duplicate;
+            }
+
+            final DmaOrderState state = requireOrder(request);
+            if (!(state.order() instanceof DmaLimitOrder)) {
+                throw new IllegalStateException("only DMA limit orders can be replaced");
+            }
+
+            lifecycleFuture = new CompletableFuture<>();
+            inFlightDeliveries.put(key, new InFlightDelivery(request, lifecycleFuture));
+            pendingSubmit = state.status() == DmaOrderStatus.NEW
+                    ? submissionsByOrder.get(request.orderId())
+                    : null;
+
+            if (state.status() == DmaOrderStatus.NEW && pendingSubmit == null) {
+                inFlightDeliveries.remove(key);
+                throw new IllegalStateException("pending submission is missing for order " + request.orderId());
+            }
+        }
+
+        if (pendingSubmit == null) {
+            dispatchReplace(key, request, lifecycleFuture);
+        } else {
+            pendingSubmit.whenComplete((ignored, submitError) -> {
+                if (submitError != null) {
+                    failDelivery(key, lifecycleFuture, submitError);
+                } else {
+                    dispatchReplace(key, request, lifecycleFuture);
                 }
             });
         }
@@ -196,7 +268,7 @@ public final class DmaOrderLifecycleService {
 
     private void completeSubmit(
             final DeliveryKey key,
-            final DmaLimitOrder request,
+            final DmaNewOrder request,
             final CompletableFuture<DmaLifecycleResult> lifecycleFuture,
             final DmaOrderResult commandResult,
             final Throwable error) {
@@ -214,13 +286,7 @@ public final class DmaOrderLifecycleService {
         synchronized (lock) {
             DmaOrderState state = orders.get(request.orderId()).applySubmitResult(commandResult);
             orders.put(request.orderId(), state);
-
-            for (final DmaFill fill : commandResult.fills()) {
-                final DmaOrderState makerState = orders.get(fill.makerOrderId());
-                if (makerState != null) {
-                    orders.put(fill.makerOrderId(), makerState.applyMakerFill(fill));
-                }
-            }
+            updateMakerStates(commandResult);
 
             lifecycleResult = new DmaLifecycleResult(
                     request.deliveryId(),
@@ -282,7 +348,7 @@ public final class DmaOrderLifecycleService {
             final DmaOrderResult commandResult,
             final Throwable error) {
         if (error != null) {
-            failCancel(key, lifecycleFuture, error);
+            failDelivery(key, lifecycleFuture, error);
             return;
         }
 
@@ -303,7 +369,86 @@ public final class DmaOrderLifecycleService {
         lifecycleFuture.complete(lifecycleResult);
     }
 
-    private void failCancel(
+    private void dispatchReplace(
+            final DeliveryKey key,
+            final DmaReplaceOrder request,
+            final CompletableFuture<DmaLifecycleResult> lifecycleFuture) {
+        DmaLifecycleResult terminalResult = null;
+        Throwable failure = null;
+
+        synchronized (lock) {
+            final DmaOrderState state = requireOrder(request);
+            if (state.status().isTerminal()) {
+                final DmaOrderResult commandResult = new DmaOrderResult(
+                        request.orderId(),
+                        CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
+                        List.of(),
+                        0,
+                        0);
+                terminalResult = new DmaLifecycleResult(
+                        request.deliveryId(),
+                        commandResult,
+                        state,
+                        false);
+                completeDelivery(key, request, terminalResult);
+            } else {
+                try {
+                    exchangeApi.replaceDmaOrder(request)
+                            .whenComplete((result, error) ->
+                                    completeReplace(key, request, lifecycleFuture, result, error));
+                } catch (final RuntimeException error) {
+                    inFlightDeliveries.remove(key);
+                    failure = error;
+                }
+            }
+        }
+
+        if (terminalResult != null) {
+            lifecycleFuture.complete(terminalResult);
+        } else if (failure != null) {
+            lifecycleFuture.completeExceptionally(failure);
+        }
+    }
+
+    private void completeReplace(
+            final DeliveryKey key,
+            final DmaReplaceOrder request,
+            final CompletableFuture<DmaLifecycleResult> lifecycleFuture,
+            final DmaOrderResult commandResult,
+            final Throwable error) {
+        if (error != null) {
+            failDelivery(key, lifecycleFuture, error);
+            return;
+        }
+
+        final DmaLifecycleResult lifecycleResult;
+        synchronized (lock) {
+            final DmaOrderState currentState = requireOrder(request);
+            final DmaOrderState nextState = currentState.applyReplaceResult(request, commandResult);
+            orders.put(request.orderId(), nextState);
+            updateMakerStates(commandResult);
+
+            lifecycleResult = new DmaLifecycleResult(
+                    request.deliveryId(),
+                    commandResult,
+                    nextState,
+                    false);
+            completeDelivery(key, request, lifecycleResult);
+        }
+
+        lifecycleFuture.complete(lifecycleResult);
+    }
+
+    private void updateMakerStates(final DmaOrderResult commandResult) {
+        for (final DmaFill fill : commandResult.fills()) {
+            final DmaOrderState makerState = orders.get(fill.makerOrderId());
+            if (makerState != null) {
+                orders.put(fill.makerOrderId(), makerState.applyMakerFill(fill));
+            }
+        }
+    }
+
+    private void failDelivery(
             final DeliveryKey key,
             final CompletableFuture<DmaLifecycleResult> lifecycleFuture,
             final Throwable error) {
@@ -314,12 +459,28 @@ public final class DmaOrderLifecycleService {
     }
 
     private DmaOrderState requireOrder(final DmaCancelOrder request) {
-        final DmaOrderState state = orders.get(request.orderId());
-        if (state == null) {
-            throw new IllegalArgumentException("unknown lifecycle order " + request.orderId());
+        return requireOrder(request.orderId(), request.clientId(), request.symbol());
+    }
+
+    private DmaOrderState requireOrder(final DmaReplaceOrder request) {
+        final DmaOrderState state =
+                requireOrder(request.orderId(), request.clientId(), request.symbol());
+        if (state.order().side() != request.side()) {
+            throw new IllegalArgumentException("replacement side does not match order " + request.orderId());
         }
-        if (state.order().clientId() != request.clientId() || state.order().symbol() != request.symbol()) {
-            throw new IllegalArgumentException("cancel request does not own order " + request.orderId());
+        return state;
+    }
+
+    private DmaOrderState requireOrder(
+            final long orderId,
+            final long clientId,
+            final int symbol) {
+        final DmaOrderState state = orders.get(orderId);
+        if (state == null) {
+            throw new IllegalArgumentException("unknown lifecycle order " + orderId);
+        }
+        if (state.order().clientId() != clientId || state.order().symbol() != symbol) {
+            throw new IllegalArgumentException("request does not own order " + orderId);
         }
         return state;
     }
@@ -362,26 +523,42 @@ public final class DmaOrderLifecycleService {
     }
 
     private enum DeliveryType {
-        SUBMIT,
-        CANCEL
+        SUBMIT_LIMIT,
+        SUBMIT_PROTECTED,
+        CANCEL,
+        REPLACE
     }
 
     private record DeliveryKey(DeliveryType type, long deliveryId) {
 
-        private static DeliveryKey submit(final long deliveryId) {
-            return new DeliveryKey(DeliveryType.SUBMIT, deliveryId);
+        private static DeliveryKey submitLimit(final long deliveryId) {
+            return new DeliveryKey(DeliveryType.SUBMIT_LIMIT, deliveryId);
+        }
+
+        private static DeliveryKey submitProtected(final long deliveryId) {
+            return new DeliveryKey(DeliveryType.SUBMIT_PROTECTED, deliveryId);
         }
 
         private static DeliveryKey cancel(final long deliveryId) {
             return new DeliveryKey(DeliveryType.CANCEL, deliveryId);
         }
 
+        private static DeliveryKey replace(final long deliveryId) {
+            return new DeliveryKey(DeliveryType.REPLACE, deliveryId);
+        }
+
         private static DeliveryKey of(final DmaDeliveryRequest request) {
             if (request instanceof DmaLimitOrder) {
-                return submit(request.deliveryId());
+                return submitLimit(request.deliveryId());
+            }
+            if (request instanceof DmaProtectedMarketOrder) {
+                return submitProtected(request.deliveryId());
             }
             if (request instanceof DmaCancelOrder) {
                 return cancel(request.deliveryId());
+            }
+            if (request instanceof DmaReplaceOrder) {
+                return replace(request.deliveryId());
             }
             throw new IllegalArgumentException("unsupported DMA delivery " + request.getClass().getName());
         }

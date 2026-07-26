@@ -5,31 +5,21 @@ import exchange.core2.core.common.OrderAction;
 import java.util.Objects;
 
 /**
- * Immutable direct-market-access request for a GTC limit order.
+ * Immediate-or-cancel marketable order with a hard execution-price boundary.
+ *
+ * <p>A bid never executes above {@code protectionPrice}; an ask never executes
+ * below it. Any unfilled quantity is rejected instead of resting.</p>
  */
-public record DmaLimitOrder(
+public record DmaProtectedMarketOrder(
         long deliveryId,
         long orderId,
         long clientId,
         int symbol,
         OrderAction side,
-        long price,
+        long protectionPrice,
         long quantity) implements DmaNewOrder {
 
-    /**
-     * Uses the order identifier as the delivery identifier.
-     */
-    public DmaLimitOrder(
-            final long orderId,
-            final long clientId,
-            final int symbol,
-            final OrderAction side,
-            final long price,
-            final long quantity) {
-        this(orderId, orderId, clientId, symbol, side, price, quantity);
-    }
-
-    public DmaLimitOrder {
+    public DmaProtectedMarketOrder {
         if (deliveryId <= 0) {
             throw new IllegalArgumentException("deliveryId must be positive");
         }
@@ -43,11 +33,16 @@ public record DmaLimitOrder(
             throw new IllegalArgumentException("symbol must not be negative");
         }
         Objects.requireNonNull(side, "side");
-        if (price <= 0) {
-            throw new IllegalArgumentException("price must be positive");
+        if (protectionPrice <= 0) {
+            throw new IllegalArgumentException("protectionPrice must be positive");
         }
         if (quantity <= 0) {
             throw new IllegalArgumentException("quantity must be positive");
         }
+    }
+
+    @Override
+    public long price() {
+        return protectionPrice;
     }
 }

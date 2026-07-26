@@ -163,6 +163,21 @@ public class SimpleEventsProcessor implements ObjLongConsumer<OrderCommand> {
                 sendApiCommandResult(new ApiMoveOrder(cmd.orderId, cmd.price, cmd.uid, cmd.symbol), cmd.resultCode, cmd.timestamp, seq);
                 break;
 
+            case REPLACE_ORDER:
+                sendApiCommandResult(
+                        new ApiReplaceOrder(
+                                cmd.orderId,
+                                cmd.price,
+                                cmd.size,
+                                cmd.reserveBidPrice,
+                                cmd.action,
+                                cmd.uid,
+                                cmd.symbol),
+                        cmd.resultCode,
+                        cmd.timestamp,
+                        seq);
+                break;
+
             case CANCEL_ORDER:
                 sendApiCommandResult(new ApiCancelOrder(cmd.orderId, cmd.uid, cmd.symbol), cmd.resultCode, cmd.timestamp, seq);
                 break;

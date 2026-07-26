@@ -27,6 +27,8 @@ import exchange.core2.core.common.api.dma.DmaCancelOrder;
 import exchange.core2.core.common.api.dma.DmaLifecycleSnapshot;
 import exchange.core2.core.common.api.dma.DmaLimitOrder;
 import exchange.core2.core.common.api.dma.DmaOrderResult;
+import exchange.core2.core.common.api.dma.DmaProtectedMarketOrder;
+import exchange.core2.core.common.api.dma.DmaReplaceOrder;
 import exchange.core2.core.common.api.reports.ApiReportQuery;
 import exchange.core2.core.common.api.reports.ReportQuery;
 import exchange.core2.core.common.api.reports.ReportResult;
@@ -105,6 +107,9 @@ public final class ExchangeApi {
 
         if (cmd instanceof ApiMoveOrder) {
             ringBuffer.publishEvent(MOVE_ORDER_TRANSLATOR, (ApiMoveOrder) cmd);
+        } else if (cmd instanceof ApiReplaceOrder) {
+            requireMatchingOnly();
+            ringBuffer.publishEvent(REPLACE_ORDER_TRANSLATOR, (ApiReplaceOrder) cmd);
         } else if (cmd instanceof ApiPlaceOrder) {
             ringBuffer.publishEvent(NEW_ORDER_TRANSLATOR, (ApiPlaceOrder) cmd);
         } else if (cmd instanceof ApiCancelOrder) {
@@ -141,6 +146,9 @@ public final class ExchangeApi {
 
         if (cmd instanceof ApiMoveOrder) {
             return submitCommandAsync(MOVE_ORDER_TRANSLATOR, (ApiMoveOrder) cmd);
+        } else if (cmd instanceof ApiReplaceOrder) {
+            requireMatchingOnly();
+            return submitCommandAsync(REPLACE_ORDER_TRANSLATOR, (ApiReplaceOrder) cmd);
         } else if (cmd instanceof ApiPlaceOrder) {
             return submitCommandAsync(NEW_ORDER_TRANSLATOR, (ApiPlaceOrder) cmd);
         } else if (cmd instanceof ApiCancelOrder) {
@@ -174,6 +182,9 @@ public final class ExchangeApi {
 
         if (cmd instanceof ApiMoveOrder) {
             return submitCommandAsyncFullResponse(MOVE_ORDER_TRANSLATOR, (ApiMoveOrder) cmd);
+        } else if (cmd instanceof ApiReplaceOrder) {
+            requireMatchingOnly();
+            return submitCommandAsyncFullResponse(REPLACE_ORDER_TRANSLATOR, (ApiReplaceOrder) cmd);
         } else if (cmd instanceof ApiPlaceOrder) {
             return submitCommandAsyncFullResponse(NEW_ORDER_TRANSLATOR, (ApiPlaceOrder) cmd);
         } else if (cmd instanceof ApiCancelOrder) {
@@ -223,6 +234,52 @@ public final class ExchangeApi {
                 .build();
 
         return submitCommandAsync(NEW_ORDER_TRANSLATOR, command, DmaOrderResult::from);
+    }
+
+    /**
+     * Submits a marketable IOC order with a hard protection price. Unfilled
+     * quantity is rejected and never rests in the order book.
+     */
+    public CompletableFuture<DmaOrderResult> submitDmaProtectedMarketOrder(
+            final DmaProtectedMarketOrder order) {
+        requireMatchingOnly();
+        Objects.requireNonNull(order, "order");
+
+        final ApiPlaceOrder command = ApiPlaceOrder.builder()
+                .orderId(order.orderId())
+                .uid(order.clientId())
+                .symbol(order.symbol())
+                .action(order.side())
+                .price(order.protectionPrice())
+                .reservePrice(order.side() == OrderAction.BID ? order.protectionPrice() : 0L)
+                .size(order.quantity())
+                .orderType(OrderType.IOC)
+                .build();
+
+        return submitCommandAsync(NEW_ORDER_TRANSLATOR, command, DmaOrderResult::from);
+    }
+
+    /**
+     * Atomically replaces both price and total quantity of a live DMA order.
+     */
+    public CompletableFuture<DmaOrderResult> replaceDmaOrder(final DmaReplaceOrder replacement) {
+        requireMatchingOnly();
+        Objects.requireNonNull(replacement, "replacement");
+
+        final ApiReplaceOrder command = ApiReplaceOrder.builder()
+                .orderId(replacement.orderId())
+                .uid(replacement.clientId())
+                .symbol(replacement.symbol())
+                .newPrice(replacement.newPrice())
+                .newQuantity(replacement.newQuantity())
+                .newReservePrice(
+                        replacement.side() == OrderAction.BID
+                                ? replacement.newPrice()
+                                : 0L)
+                .side(replacement.side())
+                .build();
+
+        return submitCommandAsync(REPLACE_ORDER_TRANSLATOR, command, DmaOrderResult::from);
     }
 
     /**
@@ -545,6 +602,20 @@ public final class ExchangeApi {
         cmd.timestamp = api.timestamp;
         cmd.resultCode = CommandResultCode.NEW;
     };
+
+    private static final EventTranslatorOneArg<OrderCommand, ApiReplaceOrder> REPLACE_ORDER_TRANSLATOR =
+            (cmd, seq, api) -> {
+                cmd.command = OrderCommandType.REPLACE_ORDER;
+                cmd.price = api.newPrice;
+                cmd.reserveBidPrice = api.newReservePrice;
+                cmd.size = api.newQuantity;
+                cmd.orderId = api.orderId;
+                cmd.symbol = api.symbol;
+                cmd.uid = api.uid;
+                cmd.action = api.side;
+                cmd.timestamp = api.timestamp;
+                cmd.resultCode = CommandResultCode.NEW;
+            };
 
     private static final EventTranslatorOneArg<OrderCommand, ApiCancelOrder> CANCEL_ORDER_TRANSLATOR = (cmd, seq, api) -> {
         cmd.command = OrderCommandType.CANCEL_ORDER;
@@ -914,6 +985,33 @@ public final class ExchangeApi {
             cmd.resultCode = CommandResultCode.NEW;
 
             cmd.price = price;
+            cmd.orderId = orderId;
+            cmd.timestamp = timestampNs;
+            cmd.symbol = symbol;
+            cmd.uid = uid;
+        });
+    }
+
+    public void replaceOrder(int serviceFlags,
+                             long eventsGroup,
+                             long timestampNs,
+                             long price,
+                             long reserveBidPrice,
+                             long quantity,
+                             OrderAction side,
+                             long orderId,
+                             int symbol,
+                             long uid) {
+        requireMatchingOnly();
+        ringBuffer.publishEvent((cmd, seq) -> {
+            cmd.serviceFlags = serviceFlags;
+            cmd.eventsGroup = eventsGroup;
+            cmd.command = OrderCommandType.REPLACE_ORDER;
+            cmd.resultCode = CommandResultCode.NEW;
+            cmd.price = price;
+            cmd.reserveBidPrice = reserveBidPrice;
+            cmd.size = quantity;
+            cmd.action = side;
             cmd.orderId = orderId;
             cmd.timestamp = timestampNs;
             cmd.symbol = symbol;

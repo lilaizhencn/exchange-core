@@ -240,6 +240,14 @@ public final class RiskEngine implements WriteBytesMarshallable {
             case ORDER_BOOK_REQUEST:
                 return false;
 
+            case REPLACE_ORDER:
+                if (shardId == 0) {
+                    cmd.resultCode = cfgMatchingOnly
+                            ? CommandResultCode.VALID_FOR_MATCHING_ENGINE
+                            : CommandResultCode.MATCHING_UNSUPPORTED_COMMAND;
+                }
+                return false;
+
             case PLACE_ORDER:
                 if (uidForThisHandler(cmd.uid)) {
                     cmd.resultCode = placeOrderRiskCheck(cmd);
