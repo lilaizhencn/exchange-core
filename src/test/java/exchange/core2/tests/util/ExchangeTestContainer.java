@@ -78,13 +78,22 @@ public final class ExchangeTestContainer implements AutoCloseable {
     public static ExchangeTestContainer create(final PerformanceConfiguration perfCfg) {
         return new ExchangeTestContainer(perfCfg,
                 InitialStateConfiguration.CLEAN_TEST,
-                SerializationConfiguration.DEFAULT);
+                SerializationConfiguration.DEFAULT,
+                OrdersProcessingConfiguration.DEFAULT);
+    }
+
+    public static ExchangeTestContainer create(final PerformanceConfiguration perfCfg,
+                                               final OrdersProcessingConfiguration ordersProcessingCfg) {
+        return new ExchangeTestContainer(perfCfg,
+                InitialStateConfiguration.CLEAN_TEST,
+                SerializationConfiguration.DEFAULT,
+                ordersProcessingCfg);
     }
 
     public static ExchangeTestContainer create(final PerformanceConfiguration perfCfg,
                                                final InitialStateConfiguration initStateCfg,
                                                final SerializationConfiguration serializationCfg) {
-        return new ExchangeTestContainer(perfCfg, initStateCfg, serializationCfg);
+        return new ExchangeTestContainer(perfCfg, initStateCfg, serializationCfg, OrdersProcessingConfiguration.DEFAULT);
     }
 
     public static TestDataFutures prepareTestDataAsync(TestDataParameters parameters, int seed) {
@@ -125,7 +134,8 @@ public final class ExchangeTestContainer implements AutoCloseable {
 
     private ExchangeTestContainer(final PerformanceConfiguration perfCfg,
                                   final InitialStateConfiguration initStateCfg,
-                                  final SerializationConfiguration serializationCfg) {
+                                  final SerializationConfiguration serializationCfg,
+                                  final OrdersProcessingConfiguration ordersProcessingCfg) {
 
         //log.debug("CREATING exchange container");
 
@@ -135,7 +145,7 @@ public final class ExchangeTestContainer implements AutoCloseable {
                 .initStateCfg(initStateCfg)
                 .performanceCfg(perfCfg)
                 .reportsQueriesCfg(ReportsQueriesConfiguration.createStandardConfig())
-                .ordersProcessingCfg(OrdersProcessingConfiguration.DEFAULT)
+                .ordersProcessingCfg(ordersProcessingCfg)
                 .loggingCfg(LoggingConfiguration.DEFAULT)
                 .serializationCfg(serializationCfg)
                 .build();

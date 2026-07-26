@@ -34,10 +34,10 @@ public final class CoreSymbolSpecification implements WriteBytesMarshallable, St
     @NonNull
     public final SymbolType type;
 
-    // currency pair specification
-    public final int baseCurrency;  // base currency
+    // instrument accounting specification
+    public final int baseCurrency;  // base asset (currency, equity, or contract)
     public final int quoteCurrency; // quote/counter currency (OR futures contract currency)
-    public final long baseScaleK;   // base currency amount multiplier (lot size in base currency units)
+    public final long baseScaleK;   // base asset amount multiplier (lot size in base asset units)
     public final long quoteScaleK;  // quote currency amount multiplier (step size in quote currency units)
 
     // fees per lot in quote? currency units

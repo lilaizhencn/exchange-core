@@ -62,7 +62,7 @@ Benchmark configuration:
 - No floating-point arithmetic, no loss of significance is possible.
 - Matching engine and risk control operations are atomic and deterministic.
 - Pipelined multi-core processing (based on LMAX Disruptor): each CPU core is responsible for certain processing stage, user accounts shard, or symbol order books shard.
-- Two different risk processing modes (specified per symbol): direct-exchange and margin-trade.
+- Two different risk processing modes (specified per symbol): fully funded cash-market (currency pairs and equities) and margin-trade.
 - Maker/taker fees (defined in quote currency units).
 - Two order books implementations: simple implementation ("Naive") and performance implementation ("Direct").
 - Order types: Immediate-or-Cancel (IOC), Good-till-Cancel (GTC), Fill-or-Kill Budget (FOK-B)

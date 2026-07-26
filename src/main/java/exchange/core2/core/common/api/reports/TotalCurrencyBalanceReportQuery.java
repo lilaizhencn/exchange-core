@@ -17,7 +17,6 @@ package exchange.core2.core.common.api.reports;
 
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.PositionDirection;
-import exchange.core2.core.common.SymbolType;
 import exchange.core2.core.processors.MatchingEngineRouter;
 import exchange.core2.core.processors.RiskEngine;
 import exchange.core2.core.processors.SymbolSpecificationProvider;
@@ -58,7 +57,7 @@ public final class TotalCurrencyBalanceReportQuery implements ReportQuery<TotalC
         final IntLongHashMap currencyBalance = new IntLongHashMap();
 
         matchingEngine.getOrderBooks().stream()
-                .filter(ob -> ob.getSymbolSpec().type == SymbolType.CURRENCY_EXCHANGE_PAIR)
+                .filter(ob -> ob.getSymbolSpec().type.isCashMarket())
                 .forEach(ob -> {
                     final CoreSymbolSpecification spec = ob.getSymbolSpec();
 

@@ -394,7 +394,7 @@ public final class OrderBookNaiveImpl implements IOrderBook {
         cmd.action = order.getAction();
 
         // reserved price risk check for exchange bids
-        if (symbolSpec.type == SymbolType.CURRENCY_EXCHANGE_PAIR && order.action == OrderAction.BID && cmd.price > order.reserveBidPrice) {
+        if (symbolSpec.type.isCashMarket() && order.action == OrderAction.BID && cmd.price > order.reserveBidPrice) {
             return CommandResultCode.MATCHING_MOVE_FAILED_PRICE_OVER_RISK_LIMIT;
         }
 

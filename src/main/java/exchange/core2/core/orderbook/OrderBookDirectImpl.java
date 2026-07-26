@@ -410,7 +410,7 @@ public final class OrderBookDirectImpl implements IOrderBook {
         }
 
         // risk check for exchange bids
-        if (symbolSpec.type == SymbolType.CURRENCY_EXCHANGE_PAIR && orderToMove.action == OrderAction.BID && cmd.price > orderToMove.reserveBidPrice) {
+        if (symbolSpec.type.isCashMarket() && orderToMove.action == OrderAction.BID && cmd.price > orderToMove.reserveBidPrice) {
             return CommandResultCode.MATCHING_MOVE_FAILED_PRICE_OVER_RISK_LIMIT;
         }
 

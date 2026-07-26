@@ -327,7 +327,7 @@ public final class RiskEngine implements WriteBytesMarshallable {
 
             final IntObjectHashMap<CoreSymbolSpecification> symbols = ((BatchAddSymbolsCommand) message).getSymbols();
             symbols.forEach(spec -> {
-                if (spec.type == SymbolType.CURRENCY_EXCHANGE_PAIR || cfgMarginTradingEnabled) {
+                if (spec.type.isCashMarket() || cfgMarginTradingEnabled) {
                     symbolSpecificationProvider.addSymbol(spec);
                 } else {
                     log.warn("Margin symbols are not allowed: {}", spec);
@@ -393,7 +393,7 @@ public final class RiskEngine implements WriteBytesMarshallable {
                                          final CoreSymbolSpecification spec) {
 
 
-        if (spec.type == SymbolType.CURRENCY_EXCHANGE_PAIR) {
+        if (spec.type.isCashMarket()) {
 
             return placeExchangeOrder(cmd, userProfile, spec);
 
@@ -577,7 +577,7 @@ public final class RiskEngine implements WriteBytesMarshallable {
         if (mte != null && mte.eventType != MatcherEventType.BINARY_EVENT) {
             // at least one event to process, resolving primary/taker user profile
             // TODO processing order is reversed
-            if (spec.type == SymbolType.CURRENCY_EXCHANGE_PAIR) {
+            if (spec.type.isCashMarket()) {
 
                 final UserProfile takerUp = uidForThisHandler(cmd.uid)
                         ? userProfileService.getUserProfileOrAddSuspended(cmd.uid)

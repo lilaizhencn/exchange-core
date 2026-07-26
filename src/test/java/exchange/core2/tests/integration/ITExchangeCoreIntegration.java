@@ -99,7 +99,7 @@ public abstract class ITExchangeCoreIntegration {
                 assertNull(cmd.matcherEvent);
             });
 
-            final int reserve102 = symbolSpec.type == SymbolType.CURRENCY_EXCHANGE_PAIR ? 1561 : 0;
+            final int reserve102 = symbolSpec.type.isCashMarket() ? 1561 : 0;
             final ApiPlaceOrder order102 = ApiPlaceOrder.builder().uid(UID_1).orderId(102).price(1550).reservePrice(reserve102).size(4)
                     .action(OrderAction.BID).orderType(GTC).symbol(symbolSpec.symbolId).build();
             log.debug("PLACE 102: {}", order102);
@@ -112,7 +112,7 @@ public abstract class ITExchangeCoreIntegration {
             assertEquals(l2helper.build(), container.requestCurrentOrderBook(symbolSpec.symbolId));
 
             // ### 2. second user sends market order, first order partially matched
-            final int reserve201 = symbolSpec.type == SymbolType.CURRENCY_EXCHANGE_PAIR ? 1800 : 0;
+            final int reserve201 = symbolSpec.type.isCashMarket() ? 1800 : 0;
             final ApiPlaceOrder order201 = ApiPlaceOrder.builder().uid(UID_2).orderId(201).price(1700).reservePrice(reserve201).size(2).action(OrderAction.BID).orderType(OrderType.IOC).symbol(symbolSpec.symbolId).build();
             log.debug("PLACE 201: {}", order201);
             container.submitCommandSync(order201, cmd -> {
@@ -141,7 +141,7 @@ public abstract class ITExchangeCoreIntegration {
 
 
             // ### 3. second user places limit order
-            final int reserve202 = symbolSpec.type == SymbolType.CURRENCY_EXCHANGE_PAIR ? 1583 : 0;
+            final int reserve202 = symbolSpec.type.isCashMarket() ? 1583 : 0;
             final ApiPlaceOrder order202 = ApiPlaceOrder.builder().uid(UID_2).orderId(202).price(1583).reservePrice(reserve202)
                     .size(4).action(OrderAction.BID).orderType(GTC).symbol(symbolSpec.symbolId).build();
             log.debug("PLACE 202: {}", order202);

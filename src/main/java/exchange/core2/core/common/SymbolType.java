@@ -23,12 +23,23 @@ import java.util.Arrays;
 public enum SymbolType {
     CURRENCY_EXCHANGE_PAIR(0),
     FUTURES_CONTRACT(1),
-    OPTION(2);
+    OPTION(2),
+    EQUITY(3);
 
     private byte code;
 
     SymbolType(int code) {
         this.code = (byte) code;
+    }
+
+    /**
+     * Instruments settled by transferring a fully funded base asset against a
+     * quote currency. Equities use the same cash-accounting model as spot
+     * currency pairs, while retaining a distinct type for downstream business
+     * rules and reporting.
+     */
+    public boolean isCashMarket() {
+        return this == CURRENCY_EXCHANGE_PAIR || this == EQUITY;
     }
 
     public static SymbolType of(int code) {
