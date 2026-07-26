@@ -23,16 +23,19 @@ import exchange.core2.core.common.OrderAction;
 import exchange.core2.core.common.OrderType;
 import exchange.core2.core.common.api.*;
 import exchange.core2.core.common.api.binary.BinaryDataCommand;
+import exchange.core2.core.common.api.dma.DmaCancelOrder;
+import exchange.core2.core.common.api.dma.DmaLimitOrder;
+import exchange.core2.core.common.api.dma.DmaOrderResult;
 import exchange.core2.core.common.api.reports.ApiReportQuery;
 import exchange.core2.core.common.api.reports.ReportQuery;
 import exchange.core2.core.common.api.reports.ReportResult;
 import exchange.core2.core.common.cmd.CommandResultCode;
 import exchange.core2.core.common.cmd.OrderCommand;
 import exchange.core2.core.common.cmd.OrderCommandType;
+import exchange.core2.core.common.config.OrdersProcessingConfiguration;
 import exchange.core2.core.orderbook.OrderBookEventsHelper;
 import exchange.core2.core.processors.BinaryCommandsProcessor;
 import exchange.core2.core.utils.SerializationUtils;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.jpountz.lz4.LZ4Compressor;
 import net.openhft.chronicle.bytes.WriteBytesMarshallable;
@@ -42,6 +45,7 @@ import org.eclipse.collections.impl.map.mutable.ConcurrentHashMap;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -49,17 +53,35 @@ import java.util.function.LongConsumer;
 import java.util.stream.Stream;
 
 @Slf4j
-@RequiredArgsConstructor
 public final class ExchangeApi {
 
     private final RingBuffer<OrderCommand> ringBuffer;
     private final LZ4Compressor lz4Compressor;
+    private final OrdersProcessingConfiguration.RiskProcessingMode riskProcessingMode;
 
     // promises cache (TODO can be changed to queue)
     private final Map<Long, Consumer<OrderCommand>> promises = new ConcurrentHashMap<>();
 
     public static final int LONGS_PER_MESSAGE = 5;
 
+    /**
+     * Creates the standard risk-managed API.
+     */
+    public ExchangeApi(final RingBuffer<OrderCommand> ringBuffer,
+                       final LZ4Compressor lz4Compressor) {
+        this(
+                ringBuffer,
+                lz4Compressor,
+                OrdersProcessingConfiguration.RiskProcessingMode.FULL_PER_CURRENCY);
+    }
+
+    public ExchangeApi(final RingBuffer<OrderCommand> ringBuffer,
+                       final LZ4Compressor lz4Compressor,
+                       final OrdersProcessingConfiguration.RiskProcessingMode riskProcessingMode) {
+        this.ringBuffer = Objects.requireNonNull(ringBuffer, "ringBuffer");
+        this.lz4Compressor = Objects.requireNonNull(lz4Compressor, "lz4Compressor");
+        this.riskProcessingMode = Objects.requireNonNull(riskProcessingMode, "riskProcessingMode");
+    }
 
     public void processResult(final long seq, final OrderCommand cmd) {
 
@@ -171,6 +193,56 @@ public final class ExchangeApi {
         }
     }
 
+    /**
+     * Submits a price-time-priority GTC limit order directly to a core configured
+     * with {@code MATCHING_ONLY}. The result snapshots fills in matching-engine
+     * event order before the underlying ring-buffer entry can be reused.
+     *
+     * @param order immutable DMA limit-order request
+     * @return immutable command result and ordered fills
+     */
+    public CompletableFuture<DmaOrderResult> submitDmaLimitOrder(final DmaLimitOrder order) {
+        requireMatchingOnly();
+        Objects.requireNonNull(order, "order");
+
+        final ApiPlaceOrder command = ApiPlaceOrder.builder()
+                .orderId(order.orderId())
+                .uid(order.clientId())
+                .symbol(order.symbol())
+                .action(order.side())
+                .price(order.price())
+                .reservePrice(order.side() == OrderAction.BID ? order.price() : 0L)
+                .size(order.quantity())
+                .orderType(OrderType.GTC)
+                .build();
+
+        return submitCommandAsync(NEW_ORDER_TRANSLATOR, command, DmaOrderResult::from);
+    }
+
+    /**
+     * Cancels the unfilled remainder of a DMA order in {@code MATCHING_ONLY}.
+     *
+     * @param cancel immutable DMA cancellation request
+     * @return immutable result containing the cancelled quantity
+     */
+    public CompletableFuture<DmaOrderResult> cancelDmaOrder(final DmaCancelOrder cancel) {
+        requireMatchingOnly();
+        Objects.requireNonNull(cancel, "cancel");
+
+        final ApiCancelOrder command = ApiCancelOrder.builder()
+                .orderId(cancel.orderId())
+                .uid(cancel.clientId())
+                .symbol(cancel.symbol())
+                .build();
+
+        return submitCommandAsync(CANCEL_ORDER_TRANSLATOR, command, DmaOrderResult::from);
+    }
+
+    private void requireMatchingOnly() {
+        if (!riskProcessingMode.isMatchingOnly()) {
+            throw new IllegalStateException("DMA order flow requires RiskProcessingMode.MATCHING_ONLY");
+        }
+    }
 
     public void submitCommandsSync(List<? extends ApiCommand> cmd) {
         if (cmd.isEmpty()) {

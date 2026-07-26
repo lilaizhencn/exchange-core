@@ -98,7 +98,10 @@ public final class ExchangeCore {
 
         this.ringBuffer = disruptor.getRingBuffer();
 
-        this.api = new ExchangeApi(ringBuffer, perfCfg.getBinaryCommandsLz4CompressorFactory().get());
+        this.api = new ExchangeApi(
+                ringBuffer,
+                perfCfg.getBinaryCommandsLz4CompressorFactory().get(),
+                exchangeConfiguration.getOrdersProcessingCfg().getRiskProcessingMode());
 
         final IOrderBook.OrderBookFactory orderBookFactory = perfCfg.getOrderBookFactory();
 

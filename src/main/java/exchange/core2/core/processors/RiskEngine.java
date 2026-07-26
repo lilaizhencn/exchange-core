@@ -79,6 +79,7 @@ public final class RiskEngine implements WriteBytesMarshallable {
     private final Path folder;
 
     private final boolean cfgIgnoreRiskProcessing;
+    private final boolean cfgMatchingOnly;
     private final boolean cfgMarginTradingEnabled;
 
     private final ISerializationProcessor serializationProcessor;
@@ -173,7 +174,9 @@ public final class RiskEngine implements WriteBytesMarshallable {
         }
 
         final OrdersProcessingConfiguration ordersProcCfg = exchangeConfiguration.getOrdersProcessingCfg();
-        this.cfgIgnoreRiskProcessing = ordersProcCfg.getRiskProcessingMode() == OrdersProcessingConfiguration.RiskProcessingMode.NO_RISK_PROCESSING;
+        final OrdersProcessingConfiguration.RiskProcessingMode riskProcessingMode = ordersProcCfg.getRiskProcessingMode();
+        this.cfgIgnoreRiskProcessing = riskProcessingMode.bypassesRiskChecks();
+        this.cfgMatchingOnly = riskProcessingMode.isMatchingOnly();
         this.cfgMarginTradingEnabled = ordersProcCfg.getMarginTradingMode() == OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_ENABLED;
     }
 
@@ -356,6 +359,12 @@ public final class RiskEngine implements WriteBytesMarshallable {
     }
 
     private CommandResultCode placeOrderRiskCheck(final OrderCommand cmd) {
+
+        if (cfgMatchingOnly) {
+            return symbolSpecificationProvider.getSymbolSpecification(cmd.symbol) == null
+                    ? CommandResultCode.INVALID_SYMBOL
+                    : CommandResultCode.VALID_FOR_MATCHING_ENGINE;
+        }
 
         final UserProfile userProfile = userProfileService.getUserProfile(cmd.uid);
         if (userProfile == null) {
@@ -556,6 +565,10 @@ public final class RiskEngine implements WriteBytesMarshallable {
     }
 
     public boolean handlerRiskRelease(final long seq, final OrderCommand cmd) {
+
+        if (cfgMatchingOnly) {
+            return false;
+        }
 
         final int symbol = cmd.symbol;
 

@@ -28,8 +28,29 @@ public final class OrdersProcessingConfiguration {
         // risk processing is on, every currency/asset account is checked independently
         FULL_PER_CURRENCY,
 
-        // risk processing is off, any orders accepted and placed
-        NO_RISK_PROCESSING
+        /**
+         * Matching-engine-only processing for externally risk-managed order flow.
+         * Symbols must be registered, but users, balances, positions, fees, and
+         * post-trade accounting are not maintained by the core.
+         */
+        MATCHING_ONLY,
+
+        /**
+         * Risk checks are disabled, while the legacy post-trade accounting path
+         * remains enabled.
+         *
+         * @deprecated use {@link #MATCHING_ONLY} for a true matching-only core
+        */
+        @Deprecated
+        NO_RISK_PROCESSING;
+
+        public boolean bypassesRiskChecks() {
+            return this != FULL_PER_CURRENCY;
+        }
+
+        public boolean isMatchingOnly() {
+            return this == MATCHING_ONLY;
+        }
     }
 
     public enum MarginTradingMode {
