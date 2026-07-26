@@ -11,11 +11,13 @@ import java.util.List;
  * Convenient events handler interface for non latency-critical applications.<br>
  * Custom handler implementation should be attached to SimpleEventProcessor.<br>
  * Handler method are invoked from single thread in following order:
- * <table summary="execution order">
- * <tr><td>1. </td><td> commandResult</td></tr>
- * <tr><td>2A.  </td><td> optional reduceEvent <td> optional tradeEvent</td></tr>
- * <tr><td>2B. </td><td> <td>optional rejectEvent</td></tr>
- * <tr><td>3. </td><td> orderBook - mandatory for ApiOrderBookRequest, optional for other commands</td></tr>
+ * <table>
+ * <caption>Execution order</caption>
+ * <tr><th>Phase</th><th>Event</th><th>Alternative event</th></tr>
+ * <tr><td>1</td><td>commandResult</td><td></td></tr>
+ * <tr><td>2A</td><td>optional reduceEvent</td><td>optional tradeEvent</td></tr>
+ * <tr><td>2B</td><td></td><td>optional rejectEvent</td></tr>
+ * <tr><td>3</td><td>orderBook - mandatory for ApiOrderBookRequest, optional for other commands</td><td></td></tr>
  * </table>
  * Events processing will stop immediately if any handler throws an exception - you should consider wrapping logic into try-catch block if necessary.
  */
@@ -131,5 +133,4 @@ public interface IEventsHandler {
         public final int orders;
     }
 }
-
 

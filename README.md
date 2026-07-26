@@ -72,6 +72,8 @@ Benchmark configuration:
 - User suspend/resume operation (reduces memory consumption).
 - Core reports API (user balances, open interest).
 
+See [Equity symbol support](docs/equity-symbol-support.md) for the equity accounting model, scaling rules, configuration example, compatibility notes, and current limitations.
+
 ### Installation
 1. Install library into your Maven's local repository by running `mvn install`
 2. Add the following Maven dependency to your project's `pom.xml`:

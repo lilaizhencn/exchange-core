@@ -45,11 +45,24 @@
 
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <java.version>1.8</java.version>
-        <maven.compiler.target>1.8</maven.compiler.target>
-        <maven.compiler.source>1.8</maven.compiler.source>
-
-        <delombok.output>target/delombok</delombok.output>
+        <java.version>21</java.version>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
+        <maven.compiler.proc>full</maven.compiler.proc>
+        <lombok.version>1.18.46</lombok.version>
+        <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
+        <maven.surefire.plugin.version>3.5.6</maven.surefire.plugin.version>
+        <delombok.output>${project.build.directory}/delombok</delombok.output>
+        <openhft.jvm.args>
+            --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
+            --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED
+            --add-exports=java.base/jdk.internal.util=ALL-UNNAMED
+            --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
+            --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED
+            --add-opens=java.base/java.io=ALL-UNNAMED
+            --add-opens=java.base/java.lang=ALL-UNNAMED
+            --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+            --add-opens=java.base/java.util=ALL-UNNAMED
+        </openhft.jvm.args>
     </properties>
 
     <dependencies>
@@ -81,7 +94,7 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.24</version>
+            <version>${lombok.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -96,7 +109,7 @@
         <dependency>
             <groupId>net.openhft</groupId>
             <artifactId>affinity</artifactId>
-            <version>3.2.2</version>
+            <version>2026.2</version>
             <exclusions>
                 <exclusion>
                     <artifactId>slf4j-api</artifactId>
@@ -108,7 +121,7 @@
         <dependency>
             <groupId>net.openhft</groupId>
             <artifactId>chronicle-wire</artifactId>
-            <version>2.19.1</version>
+            <version>2026.8</version>
             <exclusions>
                 <exclusion>
                     <artifactId>slf4j-api</artifactId>
@@ -268,6 +281,35 @@
         </dependency>
     </dependencies>
 
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven.compiler.plugin.version}</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                    <proc>${maven.compiler.proc}</proc>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven.surefire.plugin.version}</version>
+                <configuration>
+                    <argLine>${openhft.jvm.args}</argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
     <profiles>
         <profile>
             <id>default</id>
@@ -277,20 +319,21 @@
             <build>
                 <plugins>
                     <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-surefire-plugin</artifactId>
-                        <version>3.0.0-M3</version>
-                    </plugin>
-
-                    <plugin>
                         <groupId>org.projectlombok</groupId>
                         <artifactId>lombok-maven-plugin</artifactId>
-                        <version>1.18.12.0</version>
+                        <version>1.18.20.0</version>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </dependency>
+                        </dependencies>
                         <configuration>
                             <sourceDirectory>${project.basedir}/src/main/java</sourceDirectory>
                             <outputDirectory>${delombok.output}</outputDirectory>
                             <addOutputDirectory>false</addOutputDirectory>
-                            <encoding>UTF-8</encoding>
+                            <encoding>${project.build.sourceEncoding}</encoding>
                         </configuration>
                         <executions>
                             <execution>
@@ -303,43 +346,15 @@
                     </plugin>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-antrun-plugin</artifactId>
-                        <version>1.8</version>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.4.0</version>
                         <executions>
                             <execution>
-                                <id>generate-delomboked-sources-jar</id>
+                                <id>attach-sources</id>
                                 <phase>package</phase>
                                 <goals>
-                                    <goal>run</goal>
+                                    <goal>jar-no-fork</goal>
                                 </goals>
-                                <configuration>
-                                    <target>
-                                        <jar destfile="${project.build.directory}/${project.build.finalName}-sources.jar" basedir="${delombok.output}" />
-                                    </target>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>build-helper-maven-plugin</artifactId>
-                        <version>3.1.0</version>
-                        <executions>
-                            <execution>
-                                <id>attach-delomboked-sources-jar</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>attach-artifact</goal>
-                                </goals>
-                                <configuration>
-                                    <artifacts>
-                                        <artifact>
-                                            <file>${project.build.directory}/${project.build.finalName}-sources.jar</file>
-                                            <type>jar</type>
-                                            <classifier>sources</classifier>
-                                        </artifact>
-                                    </artifacts>
-                                </configuration>
                             </execution>
                         </executions>
                     </plugin>
@@ -393,7 +408,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-javadoc-plugin</artifactId>
-                        <version>3.1.0</version>
+                        <version>3.12.0</version>
                         <executions>
                             <execution>
                                 <id>attach-javadocs</id>
