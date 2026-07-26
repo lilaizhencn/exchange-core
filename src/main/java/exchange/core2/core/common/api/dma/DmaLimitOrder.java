@@ -8,14 +8,31 @@ import java.util.Objects;
  * Immutable direct-market-access request for a GTC limit order.
  */
 public record DmaLimitOrder(
+        long deliveryId,
         long orderId,
         long clientId,
         int symbol,
         OrderAction side,
         long price,
-        long quantity) {
+        long quantity) implements DmaDeliveryRequest {
+
+    /**
+     * Uses the order identifier as the delivery identifier.
+     */
+    public DmaLimitOrder(
+            final long orderId,
+            final long clientId,
+            final int symbol,
+            final OrderAction side,
+            final long price,
+            final long quantity) {
+        this(orderId, orderId, clientId, symbol, side, price, quantity);
+    }
 
     public DmaLimitOrder {
+        if (deliveryId <= 0) {
+            throw new IllegalArgumentException("deliveryId must be positive");
+        }
         if (orderId <= 0) {
             throw new IllegalArgumentException("orderId must be positive");
         }

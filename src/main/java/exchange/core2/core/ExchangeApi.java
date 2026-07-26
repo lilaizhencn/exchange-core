@@ -24,6 +24,7 @@ import exchange.core2.core.common.OrderType;
 import exchange.core2.core.common.api.*;
 import exchange.core2.core.common.api.binary.BinaryDataCommand;
 import exchange.core2.core.common.api.dma.DmaCancelOrder;
+import exchange.core2.core.common.api.dma.DmaLifecycleSnapshot;
 import exchange.core2.core.common.api.dma.DmaLimitOrder;
 import exchange.core2.core.common.api.dma.DmaOrderResult;
 import exchange.core2.core.common.api.reports.ApiReportQuery;
@@ -33,6 +34,7 @@ import exchange.core2.core.common.cmd.CommandResultCode;
 import exchange.core2.core.common.cmd.OrderCommand;
 import exchange.core2.core.common.cmd.OrderCommandType;
 import exchange.core2.core.common.config.OrdersProcessingConfiguration;
+import exchange.core2.core.dma.DmaOrderLifecycleService;
 import exchange.core2.core.orderbook.OrderBookEventsHelper;
 import exchange.core2.core.processors.BinaryCommandsProcessor;
 import exchange.core2.core.utils.SerializationUtils;
@@ -58,6 +60,7 @@ public final class ExchangeApi {
     private final RingBuffer<OrderCommand> ringBuffer;
     private final LZ4Compressor lz4Compressor;
     private final OrdersProcessingConfiguration.RiskProcessingMode riskProcessingMode;
+    private volatile DmaOrderLifecycleService dmaOrderLifecycleService;
 
     // promises cache (TODO can be changed to queue)
     private final Map<Long, Consumer<OrderCommand>> promises = new ConcurrentHashMap<>();
@@ -81,6 +84,9 @@ public final class ExchangeApi {
         this.ringBuffer = Objects.requireNonNull(ringBuffer, "ringBuffer");
         this.lz4Compressor = Objects.requireNonNull(lz4Compressor, "lz4Compressor");
         this.riskProcessingMode = Objects.requireNonNull(riskProcessingMode, "riskProcessingMode");
+        this.dmaOrderLifecycleService = riskProcessingMode.isMatchingOnly()
+                ? new DmaOrderLifecycleService(this)
+                : null;
     }
 
     public void processResult(final long seq, final OrderCommand cmd) {
@@ -236,6 +242,25 @@ public final class ExchangeApi {
                 .build();
 
         return submitCommandAsync(CANCEL_ORDER_TRANSLATOR, command, DmaOrderResult::from);
+    }
+
+    /**
+     * Returns the stateful, idempotent DMA lifecycle boundary.
+     */
+    public DmaOrderLifecycleService dmaLifecycle() {
+        requireMatchingOnly();
+        return dmaOrderLifecycleService;
+    }
+
+    /**
+     * Replaces the lifecycle projection with a recovered checkpoint. Matching
+     * engine state must be recovered to the same command boundary separately.
+     */
+    public synchronized DmaOrderLifecycleService recoverDmaLifecycle(
+            final DmaLifecycleSnapshot snapshot) {
+        requireMatchingOnly();
+        dmaOrderLifecycleService = DmaOrderLifecycleService.recover(this, snapshot);
+        return dmaOrderLifecycleService;
     }
 
     private void requireMatchingOnly() {
