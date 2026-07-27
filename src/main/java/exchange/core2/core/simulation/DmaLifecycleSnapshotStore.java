@@ -53,14 +53,25 @@ public final class DmaLifecycleSnapshotStore {
 
     private final Path storageDirectory;
     private final String exchangeId;
+    private final String accountingMode;
 
     public DmaLifecycleSnapshotStore(
             final Path storageDirectory,
             final String exchangeId) {
+        this(storageDirectory, exchangeId, "MATCHING_ONLY");
+    }
+
+    public DmaLifecycleSnapshotStore(
+            final Path storageDirectory,
+            final String exchangeId,
+            final String accountingMode) {
         this.storageDirectory = Objects.requireNonNull(storageDirectory, "storageDirectory")
                 .toAbsolutePath()
                 .normalize();
         this.exchangeId = requireExchangeId(exchangeId);
+        this.accountingMode = Objects.requireNonNull(
+                accountingMode,
+                "accountingMode");
     }
 
     public Path checkpointPath(final long checkpointId) {
@@ -157,6 +168,7 @@ public final class DmaLifecycleSnapshotStore {
         final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (DataOutputStream output = new DataOutputStream(bytes)) {
             output.writeUTF(exchangeId);
+            output.writeUTF(accountingMode);
             output.writeLong(checkpointId);
 
             final List<Map.Entry<Long, DmaOrderState>> orders =
@@ -186,6 +198,10 @@ public final class DmaLifecycleSnapshotStore {
                      new DataInputStream(new ByteArrayInputStream(payload))) {
             if (!exchangeId.equals(input.readUTF())) {
                 throw new IOException("DMA lifecycle snapshot exchange ID mismatch");
+            }
+            if (!accountingMode.equals(input.readUTF())) {
+                throw new IOException(
+                        "DMA lifecycle snapshot accounting mode mismatch");
             }
             if (input.readLong() != expectedCheckpointId) {
                 throw new IOException("DMA lifecycle snapshot checkpoint ID mismatch");

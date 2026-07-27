@@ -30,7 +30,8 @@ import java.util.function.Supplier;
  * <p>The exchange ring buffer remains the command linearization point. This
  * service records that order in immutable lifecycle states, updates resting
  * maker orders from taker fills, and orders cancel/replace mutations behind a
- * still-pending submission.</p>
+ * still-pending submission. Submit and cancel work with matching-only and
+ * fully risk-managed exchange APIs; atomic replace remains matching-only.</p>
  */
 public final class DmaOrderLifecycleService {
 

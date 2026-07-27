@@ -2,6 +2,7 @@ package exchange.core2.core.simulation;
 
 import exchange.core2.core.common.api.dma.DmaLifecycleResult;
 import exchange.core2.core.common.api.dma.DmaOrderResult;
+import exchange.core2.core.common.api.dma.DmaOrderStatus;
 
 import java.util.EnumMap;
 import java.util.Map;
@@ -35,9 +36,26 @@ public final class ProductionSimulationMetrics {
             final DmaLifecycleResult result) {
         final OperationMetrics metrics = operation(operation);
         metrics.succeeded.increment();
+        recordOutcome(metrics, result);
+        metrics.latencies.record(System.nanoTime() - operationStartedNanos);
+    }
+
+    void portfolioFailure(
+            final SimulationOperation operation,
+            final long operationStartedNanos,
+            final DmaLifecycleResult result) {
+        final OperationMetrics metrics = operation(operation);
+        metrics.failed.increment();
+        metrics.portfolioPublicationFailures.increment();
+        recordOutcome(metrics, result);
+        metrics.latencies.record(System.nanoTime() - operationStartedNanos);
+    }
+
+    private static void recordOutcome(
+            final OperationMetrics metrics,
+            final DmaLifecycleResult result) {
         if (result.duplicateDelivery()) {
             metrics.duplicateDeliveries.increment();
-            metrics.latencies.record(System.nanoTime() - operationStartedNanos);
             return;
         }
 
@@ -45,8 +63,12 @@ public final class ProductionSimulationMetrics {
         metrics.fills.add(commandResult.fills().size());
         commandResult.fills().forEach(fill -> metrics.filledQuantity.add(fill.quantity()));
         metrics.cancelledQuantity.add(commandResult.cancelledQuantity());
-        metrics.rejectedQuantity.add(commandResult.rejectedQuantity());
-        metrics.latencies.record(System.nanoTime() - operationStartedNanos);
+        final long rejectedQuantity =
+                commandResult.rejectedQuantity() == 0
+                        && result.orderState().status() == DmaOrderStatus.REJECTED
+                        ? result.orderState().rejectedQuantity()
+                        : commandResult.rejectedQuantity();
+        metrics.rejectedQuantity.add(rejectedQuantity);
     }
 
     void success(final SimulationOperation operation, final long operationStartedNanos) {
@@ -67,6 +89,7 @@ public final class ProductionSimulationMetrics {
         long submitted = 0;
         long succeeded = 0;
         long failed = 0;
+        long portfolioPublicationFailures = 0;
         long duplicateDeliveries = 0;
         long fills = 0;
         long filledQuantity = 0;
@@ -79,6 +102,8 @@ public final class ProductionSimulationMetrics {
             submitted += snapshot.submitted();
             succeeded += snapshot.succeeded();
             failed += snapshot.failed();
+            portfolioPublicationFailures +=
+                    snapshot.portfolioPublicationFailures();
             duplicateDeliveries += snapshot.duplicateDeliveries();
             fills += snapshot.fills();
             filledQuantity += snapshot.filledQuantity();
@@ -92,6 +117,7 @@ public final class ProductionSimulationMetrics {
                 submitted,
                 succeeded,
                 failed,
+                portfolioPublicationFailures,
                 duplicateDeliveries,
                 fills,
                 filledQuantity,
@@ -110,6 +136,7 @@ public final class ProductionSimulationMetrics {
             long submitted,
             long succeeded,
             long failed,
+            long portfolioPublicationFailures,
             long duplicateDeliveries,
             long fills,
             long filledQuantity,
@@ -127,6 +154,7 @@ public final class ProductionSimulationMetrics {
             long submitted,
             long succeeded,
             long failed,
+            long portfolioPublicationFailures,
             long duplicateDeliveries,
             long fills,
             long filledQuantity,
@@ -143,6 +171,8 @@ public final class ProductionSimulationMetrics {
         private final LongAdder submitted = new LongAdder();
         private final LongAdder succeeded = new LongAdder();
         private final LongAdder failed = new LongAdder();
+        private final LongAdder portfolioPublicationFailures =
+                new LongAdder();
         private final LongAdder duplicateDeliveries = new LongAdder();
         private final LongAdder fills = new LongAdder();
         private final LongAdder filledQuantity = new LongAdder();
@@ -155,6 +185,7 @@ public final class ProductionSimulationMetrics {
                     submitted.sum(),
                     succeeded.sum(),
                     failed.sum(),
+                    portfolioPublicationFailures.sum(),
                     duplicateDeliveries.sum(),
                     fills.sum(),
                     filledQuantity.sum(),

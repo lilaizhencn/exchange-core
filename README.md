@@ -75,8 +75,8 @@ Benchmark configuration:
 See [Equity symbol support](docs/equity-symbol-support.md) for the equity accounting model, scaling rules, configuration example, compatibility notes, and current limitations.
 
 See [Production simulation](docs/production-simulation.md) for durable
-`MATCHING_ONLY` checkpoints, symbol-partition ordering, runtime metrics and JMH
-benchmarks.
+checkpoints, optional full-equity portfolio accounting, symbol-partition
+ordering, runtime metrics and JMH benchmarks.
 
 ### Installation
 1. Install library into your Maven's local repository by running `mvn install`

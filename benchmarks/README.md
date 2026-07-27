@@ -5,6 +5,8 @@ simulation layer:
 
 - `SymbolPartitionOrderingBenchmark` measures partition-lane publication.
 - `ProductionSimulationBenchmark` measures an end-to-end protected IOC.
+- `ProductionAccountingBenchmark` measures full equity risk, a user report,
+  and an in-memory Emporia portfolio publication.
 - `ProductionCheckpointBenchmark` measures a committed native-shard and DMA
   lifecycle checkpoint at two lifecycle sizes.
 

@@ -86,7 +86,7 @@ public final class ExchangeApi {
         this.ringBuffer = Objects.requireNonNull(ringBuffer, "ringBuffer");
         this.lz4Compressor = Objects.requireNonNull(lz4Compressor, "lz4Compressor");
         this.riskProcessingMode = Objects.requireNonNull(riskProcessingMode, "riskProcessingMode");
-        this.dmaOrderLifecycleService = riskProcessingMode.isMatchingOnly()
+        this.dmaOrderLifecycleService = supportsDmaLifecycle(riskProcessingMode)
                 ? new DmaOrderLifecycleService(this)
                 : null;
     }
@@ -211,15 +211,16 @@ public final class ExchangeApi {
     }
 
     /**
-     * Submits a price-time-priority GTC limit order directly to a core configured
-     * with {@code MATCHING_ONLY}. The result snapshots fills in matching-engine
-     * event order before the underlying ring-buffer entry can be reused.
+     * Submits a price-time-priority GTC limit order through the DMA lifecycle.
+     * Both {@code MATCHING_ONLY} and fully risk-managed modes are supported.
+     * The result snapshots fills in matching-engine event order before the
+     * underlying ring-buffer entry can be reused.
      *
      * @param order immutable DMA limit-order request
      * @return immutable command result and ordered fills
      */
     public CompletableFuture<DmaOrderResult> submitDmaLimitOrder(final DmaLimitOrder order) {
-        requireMatchingOnly();
+        requireDmaLifecycle();
         Objects.requireNonNull(order, "order");
 
         final ApiPlaceOrder command = ApiPlaceOrder.builder()
@@ -242,7 +243,7 @@ public final class ExchangeApi {
      */
     public CompletableFuture<DmaOrderResult> submitDmaProtectedMarketOrder(
             final DmaProtectedMarketOrder order) {
-        requireMatchingOnly();
+        requireDmaLifecycle();
         Objects.requireNonNull(order, "order");
 
         final ApiPlaceOrder command = ApiPlaceOrder.builder()
@@ -283,13 +284,13 @@ public final class ExchangeApi {
     }
 
     /**
-     * Cancels the unfilled remainder of a DMA order in {@code MATCHING_ONLY}.
+     * Cancels the unfilled remainder of a DMA order.
      *
      * @param cancel immutable DMA cancellation request
      * @return immutable result containing the cancelled quantity
      */
     public CompletableFuture<DmaOrderResult> cancelDmaOrder(final DmaCancelOrder cancel) {
-        requireMatchingOnly();
+        requireDmaLifecycle();
         Objects.requireNonNull(cancel, "cancel");
 
         final ApiCancelOrder command = ApiCancelOrder.builder()
@@ -302,10 +303,11 @@ public final class ExchangeApi {
     }
 
     /**
-     * Returns the stateful, idempotent DMA lifecycle boundary.
+     * Returns the stateful, idempotent DMA lifecycle boundary for
+     * {@code MATCHING_ONLY} or {@code FULL_PER_CURRENCY}.
      */
     public DmaOrderLifecycleService dmaLifecycle() {
-        requireMatchingOnly();
+        requireDmaLifecycle();
         return dmaOrderLifecycleService;
     }
 
@@ -315,9 +317,23 @@ public final class ExchangeApi {
      */
     public synchronized DmaOrderLifecycleService recoverDmaLifecycle(
             final DmaLifecycleSnapshot snapshot) {
-        requireMatchingOnly();
+        requireDmaLifecycle();
         dmaOrderLifecycleService = DmaOrderLifecycleService.recover(this, snapshot);
         return dmaOrderLifecycleService;
+    }
+
+    private void requireDmaLifecycle() {
+        if (!supportsDmaLifecycle(riskProcessingMode)) {
+            throw new IllegalStateException(
+                    "DMA lifecycle requires MATCHING_ONLY or FULL_PER_CURRENCY");
+        }
+    }
+
+    private static boolean supportsDmaLifecycle(
+            final OrdersProcessingConfiguration.RiskProcessingMode mode) {
+        return mode.isMatchingOnly()
+                || mode == OrdersProcessingConfiguration.RiskProcessingMode
+                        .FULL_PER_CURRENCY;
     }
 
     private void requireMatchingOnly() {

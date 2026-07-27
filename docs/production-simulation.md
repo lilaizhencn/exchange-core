@@ -1,8 +1,10 @@
 # Production simulation
 
-`ProductionSimulation` is a durable `MATCHING_ONLY` harness for exercising the
-DMA lifecycle against exchange-core without risk accounting or deployment
-infrastructure.
+`ProductionSimulation` is a durable DMA harness with two accounting modes:
+
+- `MATCHING_ONLY` for externally risk-managed order flow; and
+- `FULL_EQUITY_RISK` for fully funded share and cash accounting with an
+  asynchronous Emporia portfolio-service boundary.
 
 ## Symbol-partition ordering
 
@@ -34,12 +36,49 @@ the latest committed checkpoint are outside its recovery boundary.
 
 `ProductionSimulation.metrics()` provides cumulative lock-free counters for
 submissions, completions, failures, duplicate deliveries, fills, and filled,
-cancelled and rejected quantity. It also reports approximate p50, p95, p99 and
-maximum latency plus aggregate successful operations per second.
+cancelled and rejected quantity. Portfolio publication failures are reported
+separately while retaining the exchange fill or rejection outcome. Metrics
+also include approximate p50, p95, p99 and maximum latency plus aggregate
+successful operations per second.
 
 Cached duplicate responses do not count their fills or quantities twice.
+
+## Optional Emporia portfolio accounting
+
+`ProductionSimulationAccounting.fullEquityRisk(gateway)` configures
+`FULL_PER_CURRENCY` risk with margin disabled. In this mode:
+
+1. `onboardPortfolio(clientId)` imports a one-time
+   `EmporiaPortfolioSeed`;
+2. the core rejects an ASK without sufficient equity and a BID without
+   sufficient cash;
+3. successful trades transfer equity and cash in-engine;
+4. every completed DMA delivery publishes the affected clients'
+   `EmporiaPortfolioSnapshot` objects; and
+5. `adjustPortfolioBalance(...)` applies an idempotent funding transaction and
+   republishes the resulting available balances.
+
+The gateway is an interface rather than a concrete HTTP or messaging client,
+so the future Emporia portfolio service can choose its transport. Published
+snapshots must be deduplicated by `(deliveryId, clientId)`. A failed
+publication does not roll back an exchange command; redelivering the same DMA
+request republishes the cached result and portfolio snapshots.
+
+Portfolio snapshots contain available balances. Funds reserved by live orders
+remain represented by the order projection and are returned to available
+balances on cancellation.
+
+Full-equity-risk mode accepts only `EQUITY` symbols. DMA limit, protected IOC,
+and cancel operations are supported. Atomic replace remains matching-only
+because the full risk engine does not yet maintain enough reservation metadata
+to re-reserve an existing order atomically.
+
+Native risk state and DMA lifecycle state use the same checkpoint. The
+accounting mode is stored in the lifecycle commit marker, so recovery rejects
+a mode mismatch.
 
 ## Benchmarks
 
 The standalone [`benchmarks/`](../benchmarks/README.md) JMH project measures
-partition dispatch, protected IOC round trips and durable checkpoint latency.
+partition dispatch, matching-only and full-risk protected IOC round trips,
+portfolio publication, and durable checkpoint latency.

@@ -4,6 +4,9 @@ import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.L2MarketData;
+import exchange.core2.core.common.SymbolType;
+import exchange.core2.core.common.api.ApiAddUser;
+import exchange.core2.core.common.api.ApiAdjustUserBalance;
 import exchange.core2.core.common.api.ApiPersistState;
 import exchange.core2.core.common.api.binary.BatchAddSymbolsCommand;
 import exchange.core2.core.common.api.dma.DmaCancelOrder;
@@ -13,11 +16,12 @@ import exchange.core2.core.common.api.dma.DmaLimitOrder;
 import exchange.core2.core.common.api.dma.DmaOrderState;
 import exchange.core2.core.common.api.dma.DmaProtectedMarketOrder;
 import exchange.core2.core.common.api.dma.DmaReplaceOrder;
+import exchange.core2.core.common.api.reports.SingleUserReportQuery;
+import exchange.core2.core.common.api.reports.SingleUserReportResult;
 import exchange.core2.core.common.cmd.CommandResultCode;
 import exchange.core2.core.common.config.ExchangeConfiguration;
 import exchange.core2.core.common.config.InitialStateConfiguration;
 import exchange.core2.core.common.config.LoggingConfiguration;
-import exchange.core2.core.common.config.OrdersProcessingConfiguration;
 import exchange.core2.core.common.config.ReportsQueriesConfiguration;
 import exchange.core2.core.common.config.SerializationConfiguration;
 import exchange.core2.core.processors.journaling.DiskSerializationProcessor;
@@ -25,30 +29,30 @@ import exchange.core2.core.processors.journaling.DiskSerializationProcessorConfi
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
 /**
- * Durable MATCHING_ONLY simulation with observable order operations and
- * deterministic symbol-partition publication.
+ * Durable simulation with observable order operations, deterministic
+ * symbol-partition publication, and optional fully funded equity accounting.
  */
 public final class ProductionSimulation implements AutoCloseable {
 
-    private static final OrdersProcessingConfiguration MATCHING_ONLY =
-            OrdersProcessingConfiguration.builder()
-                    .riskProcessingMode(
-                            OrdersProcessingConfiguration.RiskProcessingMode.MATCHING_ONLY)
-                    .marginTradingMode(
-                            OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
-                    .build();
-
     private final ProductionSimulationConfiguration configuration;
+    private final ProductionSimulationAccounting accounting;
     private final ExchangeCore exchangeCore;
     private final ExchangeApi exchangeApi;
     private final SymbolPartitionDispatcher dispatcher;
@@ -56,14 +60,18 @@ public final class ProductionSimulation implements AutoCloseable {
     private final DmaLifecycleSnapshotStore lifecycleStore;
     private final ReentrantReadWriteLock checkpointLock = new ReentrantReadWriteLock();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicInteger reportTransferId = new AtomicInteger(1);
 
     private ProductionSimulation(
             final ProductionSimulationConfiguration configuration,
+            final ProductionSimulationAccounting accounting,
             final Long recoveryCheckpointId) throws IOException {
         this.configuration = Objects.requireNonNull(configuration, "configuration");
+        this.accounting = Objects.requireNonNull(accounting, "accounting");
         lifecycleStore = new DmaLifecycleSnapshotStore(
                 configuration.storageDirectory(),
-                configuration.exchangeId());
+                configuration.exchangeId(),
+                accounting.mode().name());
 
         final DmaLifecycleSnapshot recoveredLifecycle = recoveryCheckpointId == null
                 ? null
@@ -79,7 +87,8 @@ public final class ProductionSimulation implements AutoCloseable {
                 .resultsConsumer((command, sequence) -> {
                 })
                 .exchangeConfiguration(ExchangeConfiguration.defaultBuilder()
-                        .ordersProcessingCfg(MATCHING_ONLY)
+                        .ordersProcessingCfg(
+                                accounting.ordersProcessingConfiguration())
                         .performanceCfg(configuration.performanceConfiguration())
                         .initStateCfg(initialState)
                         .reportsQueriesCfg(ReportsQueriesConfiguration.createStandardConfig())
@@ -108,20 +117,47 @@ public final class ProductionSimulation implements AutoCloseable {
 
     public static ProductionSimulation start(
             final ProductionSimulationConfiguration configuration) throws IOException {
-        return new ProductionSimulation(configuration, null);
+        return start(
+                configuration,
+                ProductionSimulationAccounting.matchingOnly());
+    }
+
+    public static ProductionSimulation start(
+            final ProductionSimulationConfiguration configuration,
+            final ProductionSimulationAccounting accounting) throws IOException {
+        return new ProductionSimulation(configuration, accounting, null);
     }
 
     public static ProductionSimulation recover(
             final ProductionSimulationConfiguration configuration,
             final long checkpointId) throws IOException {
+        return recover(
+                configuration,
+                checkpointId,
+                ProductionSimulationAccounting.matchingOnly());
+    }
+
+    public static ProductionSimulation recover(
+            final ProductionSimulationConfiguration configuration,
+            final long checkpointId,
+            final ProductionSimulationAccounting accounting) throws IOException {
         if (checkpointId <= 0) {
             throw new IllegalArgumentException("checkpointId must be positive");
         }
-        return new ProductionSimulation(configuration, checkpointId);
+        return new ProductionSimulation(
+                configuration,
+                accounting,
+                checkpointId);
     }
 
     public void addSymbols(final Collection<CoreSymbolSpecification> symbols) {
         Objects.requireNonNull(symbols, "symbols");
+        if (accounting.isFullEquityRisk()
+                && symbols.stream().anyMatch(
+                        symbol -> symbol.getType() != SymbolType.EQUITY)) {
+            throw new IllegalArgumentException(
+                    "FULL_EQUITY_RISK accepts only EQUITY symbols");
+        }
         checkpointLock.writeLock().lock();
         try {
             requireOpen();
@@ -239,6 +275,107 @@ public final class ProductionSimulation implements AutoCloseable {
         return configuration;
     }
 
+    public ProductionSimulationAccounting accounting() {
+        return accounting;
+    }
+
+    /**
+     * Imports one client exactly once from the configured Emporia portfolio
+     * gateway. Assets are funded in ascending asset-ID order using consecutive
+     * transaction IDs from the seed.
+     */
+    public CompletableFuture<EmporiaPortfolioSnapshot> onboardPortfolio(
+            final long clientId) {
+        requireFullEquityRisk();
+        requireOpen();
+        return Objects.requireNonNull(
+                        accounting.portfolioGateway().load(clientId),
+                        "portfolio load future")
+                .thenApply(seed -> importPortfolio(clientId, seed));
+    }
+
+    /**
+     * Reads the available risk-engine balances at a command boundary.
+     */
+    public CompletableFuture<EmporiaPortfolioSnapshot> portfolioSnapshot(
+            final long clientId,
+            final long deliveryId) {
+        requireFullEquityRisk();
+        requireOpen();
+        if (clientId <= 0) {
+            throw new IllegalArgumentException("clientId must be positive");
+        }
+        if (deliveryId < 0) {
+            throw new IllegalArgumentException(
+                    "deliveryId must not be negative");
+        }
+
+        return exchangeApi.processReport(
+                        new SingleUserReportQuery(clientId),
+                        nextReportTransferId())
+                .thenApply(report ->
+                        toPortfolioSnapshot(deliveryId, clientId, report));
+    }
+
+    /**
+     * Applies an idempotent funding or withdrawal transaction, then publishes
+     * the resulting available balances to Emporia. Retrying the same
+     * transaction ID is safe when the first portfolio publication failed.
+     */
+    public CompletableFuture<EmporiaPortfolioSnapshot> adjustPortfolioBalance(
+            final long clientId,
+            final int assetId,
+            final long amount,
+            final long transactionId,
+            final long deliveryId) {
+        requireFullEquityRisk();
+        if (clientId <= 0) {
+            throw new IllegalArgumentException("clientId must be positive");
+        }
+        if (assetId < 0) {
+            throw new IllegalArgumentException(
+                    "assetId must not be negative");
+        }
+        if (transactionId <= 0) {
+            throw new IllegalArgumentException(
+                    "transactionId must be positive");
+        }
+        if (deliveryId <= 0) {
+            throw new IllegalArgumentException(
+                    "deliveryId must be positive");
+        }
+
+        final EmporiaPortfolioSnapshot snapshot;
+        checkpointLock.writeLock().lock();
+        try {
+            requireOpen();
+            dispatcher.publicationBarrier().join();
+            final CommandResultCode result = exchangeApi.submitCommandAsync(
+                    ApiAdjustUserBalance.builder()
+                            .uid(clientId)
+                            .currency(assetId)
+                            .amount(amount)
+                            .transactionId(transactionId)
+                            .build())
+                    .join();
+            if (result != CommandResultCode.SUCCESS
+                    && result
+                    != CommandResultCode
+                            .USER_MGMT_ACCOUNT_BALANCE_ADJUSTMENT_ALREADY_APPLIED_SAME) {
+                throw new IllegalStateException(
+                        "adjust portfolio balance failed: " + result);
+            }
+            snapshot = portfolioSnapshot(clientId, deliveryId).join();
+        } finally {
+            checkpointLock.writeLock().unlock();
+        }
+
+        return Objects.requireNonNull(
+                        accounting.portfolioGateway().publish(snapshot),
+                        "portfolio publish future")
+                .thenApply(ignored -> snapshot);
+    }
+
     private CompletableFuture<ProductionSimulationResult> execute(
             final SimulationOperation operation,
             final int symbol,
@@ -253,16 +390,41 @@ public final class ProductionSimulation implements AutoCloseable {
             final CompletableFuture<ProductionSimulationResult> result =
                     new CompletableFuture<>();
             partitionResult.whenComplete((completed, error) -> {
-                if (error == null) {
-                    metrics.success(operation, startedNanos, completed.value());
-                    result.complete(new ProductionSimulationResult(
-                            operation,
-                            completed.partition(),
-                            completed.partitionSequence(),
-                            completed.value()));
-                } else {
+                if (error != null) {
                     metrics.failure(operation, startedNanos);
                     result.completeExceptionally(unwrap(error));
+                    return;
+                }
+
+                try {
+                    synchronizePortfolios(completed.value())
+                            .whenComplete((ignored, synchronizationError) -> {
+                                if (synchronizationError == null) {
+                                    metrics.success(
+                                            operation,
+                                            startedNanos,
+                                            completed.value());
+                                    result.complete(
+                                            new ProductionSimulationResult(
+                                                    operation,
+                                                    completed.partition(),
+                                                    completed.partitionSequence(),
+                                                    completed.value()));
+                                } else {
+                                    metrics.portfolioFailure(
+                                            operation,
+                                            startedNanos,
+                                            completed.value());
+                                    result.completeExceptionally(
+                                            unwrap(synchronizationError));
+                                }
+                            });
+                } catch (final RuntimeException synchronizationError) {
+                    metrics.portfolioFailure(
+                            operation,
+                            startedNanos,
+                            completed.value());
+                    result.completeExceptionally(synchronizationError);
                 }
             });
             return result;
@@ -277,6 +439,118 @@ public final class ProductionSimulation implements AutoCloseable {
     private void requireOpen() {
         if (closed.get()) {
             throw new IllegalStateException("production simulation is closed");
+        }
+    }
+
+    private void requireFullEquityRisk() {
+        if (!accounting.isFullEquityRisk()) {
+            throw new IllegalStateException(
+                    "portfolio integration requires FULL_EQUITY_RISK");
+        }
+    }
+
+    private EmporiaPortfolioSnapshot importPortfolio(
+            final long requestedClientId,
+            final EmporiaPortfolioSeed seed) {
+        Objects.requireNonNull(seed, "portfolio seed");
+        if (seed.clientId() != requestedClientId) {
+            throw new IllegalArgumentException(
+                    "portfolio seed client ID does not match request");
+        }
+
+        checkpointLock.writeLock().lock();
+        try {
+            requireOpen();
+            dispatcher.publicationBarrier().join();
+            requireCommandSuccess(
+                    exchangeApi.submitCommandAsync(
+                            ApiAddUser.builder()
+                                    .uid(seed.clientId())
+                                    .build())
+                            .join(),
+                    "create portfolio client");
+
+            final List<Map.Entry<Integer, Long>> balances =
+                    seed.balances().entrySet().stream()
+                            .sorted(Map.Entry.comparingByKey())
+                            .toList();
+            for (int index = 0; index < balances.size(); index++) {
+                final Map.Entry<Integer, Long> balance = balances.get(index);
+                requireCommandSuccess(
+                        exchangeApi.submitCommandAsync(
+                                ApiAdjustUserBalance.builder()
+                                        .uid(seed.clientId())
+                                        .currency(balance.getKey())
+                                        .amount(balance.getValue())
+                                        .transactionId(Math.addExact(
+                                                seed.firstTransactionId(),
+                                                index))
+                                        .build())
+                                .join(),
+                        "fund portfolio client");
+            }
+
+            return portfolioSnapshot(seed.clientId(), 0).join();
+        } finally {
+            checkpointLock.writeLock().unlock();
+        }
+    }
+
+    private CompletableFuture<Void> synchronizePortfolios(
+            final DmaLifecycleResult lifecycleResult) {
+        if (!accounting.isFullEquityRisk()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        final Set<Long> affectedClients = new TreeSet<>();
+        affectedClients.add(lifecycleResult.orderState().order().clientId());
+        lifecycleResult.commandResult().fills().forEach(
+                fill -> affectedClients.add(fill.makerClientId()));
+
+        final List<CompletableFuture<Void>> publications =
+                new ArrayList<>(affectedClients.size());
+        for (final long clientId : affectedClients) {
+            publications.add(portfolioSnapshot(
+                            clientId,
+                            lifecycleResult.deliveryId())
+                    .thenCompose(snapshot -> Objects.requireNonNull(
+                            accounting.portfolioGateway().publish(snapshot),
+                            "portfolio publish future")));
+        }
+        return CompletableFuture.allOf(
+                publications.toArray(CompletableFuture[]::new));
+    }
+
+    private int nextReportTransferId() {
+        return reportTransferId.getAndUpdate(
+                current -> current == Integer.MAX_VALUE ? 1 : current + 1);
+    }
+
+    private static EmporiaPortfolioSnapshot toPortfolioSnapshot(
+            final long deliveryId,
+            final long clientId,
+            final SingleUserReportResult report) {
+        if (report.getQueryExecutionStatus()
+                != SingleUserReportResult.QueryExecutionStatus.OK
+                || report.getAccounts() == null) {
+            throw new IllegalStateException(
+                    "portfolio client " + clientId + " was not found");
+        }
+
+        final Map<Integer, Long> balances = new HashMap<>();
+        report.getAccounts().forEachKeyValue(balances::put);
+        return new EmporiaPortfolioSnapshot(
+                deliveryId,
+                clientId,
+                balances);
+    }
+
+    private static void requireCommandSuccess(
+            final CommandResultCode result,
+            final String operation) {
+        if (result != CommandResultCode.SUCCESS) {
+            throw new IllegalStateException(
+                    operation + " failed: " + result);
         }
     }
 

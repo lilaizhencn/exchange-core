@@ -83,14 +83,27 @@ class MatchingOnlyDmaTest {
     }
 
     @Test
-    void shouldRejectDmaFlowOutsideMatchingOnlyMode() {
-        try (ExchangeTestContainer container = ExchangeTestContainer.create(PerformanceConfiguration.DEFAULT)) {
+    void shouldRejectDmaFlowInLegacyNoRiskMode() {
+        final OrdersProcessingConfiguration legacyNoRisk =
+                OrdersProcessingConfiguration.builder()
+                        .riskProcessingMode(
+                                OrdersProcessingConfiguration.RiskProcessingMode
+                                        .NO_RISK_PROCESSING)
+                        .marginTradingMode(
+                                OrdersProcessingConfiguration.MarginTradingMode
+                                        .MARGIN_TRADING_DISABLED)
+                        .build();
+
+        try (ExchangeTestContainer container =
+                     ExchangeTestContainer.create(
+                             PerformanceConfiguration.DEFAULT,
+                             legacyNoRisk)) {
             final IllegalStateException exception = assertThrows(
                     IllegalStateException.class,
                     () -> container.getApi().submitDmaLimitOrder(
                             new DmaLimitOrder(1, 10, AAPL_USD, OrderAction.BID, 100, 1)));
 
-            assertTrue(exception.getMessage().contains("MATCHING_ONLY"));
+            assertTrue(exception.getMessage().contains("FULL_PER_CURRENCY"));
         }
     }
 

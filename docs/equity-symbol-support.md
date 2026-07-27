@@ -132,6 +132,10 @@ price is rejected.
 This is deterministic in-engine asset and cash accounting. It is not external
 securities settlement.
 
+The optional production-simulation adapter can seed these balances from a
+future Emporia portfolio service and publish post-command available-balance
+snapshots. See [Production simulation](production-simulation.md#optional-emporia-portfolio-accounting).
+
 ## Current limitations
 
 Equity support does not currently provide:

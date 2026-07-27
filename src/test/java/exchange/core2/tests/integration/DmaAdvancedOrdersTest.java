@@ -132,11 +132,11 @@ class DmaAdvancedOrdersTest {
     }
 
     @Test
-    void shouldRejectAdvancedDmaOrdersOutsideMatchingOnlyMode() {
+    void shouldAllowProtectedOrdersButRejectAtomicReplaceWithFullRisk() {
         try (ExchangeTestContainer container = ExchangeTestContainer.create(PerformanceConfiguration.DEFAULT)) {
-            assertThrows(
-                    IllegalStateException.class,
-                    () -> container.getApi().submitDmaProtectedMarketOrder(
+            container.addSymbol(AAPL);
+            final DmaOrderResult protectedResult =
+                    container.getApi().submitDmaProtectedMarketOrder(
                             new DmaProtectedMarketOrder(
                                     601,
                                     1_001,
@@ -144,7 +144,12 @@ class DmaAdvancedOrdersTest {
                                     AAPL_USD,
                                     OrderAction.BID,
                                     100,
-                                    1)));
+                                    1))
+                            .join();
+            assertEquals(
+                    CommandResultCode.AUTH_INVALID_USER,
+                    protectedResult.resultCode());
+
             assertThrows(
                     IllegalStateException.class,
                     () -> container.getApi().replaceDmaOrder(
