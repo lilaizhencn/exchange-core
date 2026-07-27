@@ -148,10 +148,87 @@ var simulation =
         ProductionSimulation.start(configuration, accounting);
 ```
 
-The `CompletableFuture` returned by `publish` completes when Emporia returns a
-successful HTTP response. For production crash safety, place a durable outbox
-behind the Emporia endpoint or replace the publisher with an outbox-backed
-gateway; HTTP success alone is not an atomic commit with exchange-core state.
+The direct HTTP gateway remains useful for development: its
+`CompletableFuture` completes when Emporia returns a successful response. Use
+`DurableEmporiaPortfolioGateway` in a production simulation. Its future
+completes after PostgreSQL commits the immutable outbound event, while a
+separate lease-based worker delivers that event to Emporia.
+
+### Durable portfolio outbox
+
+Apply
+`src/main/resources/db/portfolio-outbox/V1__create_portfolio_outbox.sql` to a
+PostgreSQL database owned by the embedding exchange process. Then supply a
+managed JDBC `DataSource`:
+
+```java
+var http = new HttpEmporiaPortfolioGateway(gatewayConfiguration);
+var outbox = DurableEmporiaPortfolioGateway.start(
+        http,
+        dataSource,
+        PortfolioOutboxConfiguration.defaults(instanceId));
+var accounting =
+        ProductionSimulationAccounting.fullEquityRisk(outbox);
+
+try (outbox;
+     var simulation =
+             ProductionSimulation.start(configuration, accounting)) {
+    // Submit DMA operations.
+}
+```
+
+The outbox stores the exact encoded request bytes and SHA-256 digest. Enqueuing
+the same event and content is idempotent; reusing an event ID with different
+content fails. Workers atomically claim ready rows with a lease, deliver
+different clients concurrently, and preserve sequence order for one client.
+An expired `IN_FLIGHT` lease is eligible for another worker after a process
+crash.
+
+Transport failures, HTTP `408`, `429`, and `5xx` responses move a row to
+`RETRY` with capped exponential jitter. Other HTTP `4xx` responses move it to
+`DEAD`. Because events are full snapshots, a dead row does not block a later
+snapshot forever; operators should still alert and investigate it. A successful
+or identical duplicate response moves the row to `PUBLISHED`.
+
+Published and dead rows are retained for audit and idempotency rather than
+deleted automatically. Define an operator-owned retention or archival job
+before sustained load; never purge pending, retrying, or leased rows.
+
+Useful backlog checks include:
+
+```sql
+SELECT status, count(*), min(created_at)
+FROM exchange_core_portfolio_outbox
+GROUP BY status;
+
+SELECT event_id, client_id, attempt_count, next_attempt_at, last_error
+FROM exchange_core_portfolio_outbox
+WHERE status IN ('RETRY', 'DEAD')
+ORDER BY sequence_id;
+```
+
+Run the real PostgreSQL outbox specification with:
+
+```bash
+mvn -Ppostgres-it test
+```
+
+This verifies duplicate enqueue, per-client ordering, and reclaim after a
+publisher process loses its lease.
+
+#### Crash boundary
+
+The outbox guarantees delivery survival once `publish()` commits the row. It
+does not make the earlier exchange mutation and outbox insert one database
+transaction. `ProductionSimulation` currently has checkpoint recovery with
+continuous journaling disabled, so a crash after an exchange command but
+before enqueue remains a gap.
+
+Closing that final gap requires continuously journaling the DMA inbox and
+lifecycle and deterministically replaying every operation after the last
+checkpoint, including regeneration of the same portfolio event ID and payload.
+Do not claim strict end-to-end crash recovery until that replay boundary is
+implemented and tested.
 
 ## Benchmarks
 

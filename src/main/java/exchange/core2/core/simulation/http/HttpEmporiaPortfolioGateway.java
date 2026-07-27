@@ -94,13 +94,15 @@ public final class HttpEmporiaPortfolioGateway
     @Override
     public CompletableFuture<Void> publish(
             final EmporiaPortfolioSnapshot snapshot) {
-        Objects.requireNonNull(snapshot, "snapshot");
+        return publishEncoded(encode(snapshot));
+    }
 
-        final URI endpoint = endpointBaseUri.resolve(
-                "internal/v1/portfolio-snapshots/"
-                        + snapshot.deliveryId()
-                        + "/"
-                        + snapshot.clientId());
+    /**
+     * Encodes a snapshot once for direct delivery or durable outbox storage.
+     */
+    public EmporiaPortfolioHttpEvent encode(
+            final EmporiaPortfolioSnapshot snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
         final String idempotencyKey =
                 configuration.exchangeId()
                         + ":"
@@ -114,24 +116,43 @@ public final class HttpEmporiaPortfolioGateway
                             configuration.exchangeId(),
                             snapshot));
         } catch (final IOException error) {
-            return CompletableFuture.failedFuture(
-                    protocolFailure(
-                            "encode portfolio snapshot",
-                            error));
+            throw protocolFailure(
+                    "encode portfolio snapshot",
+                    error);
         }
 
+        return new EmporiaPortfolioHttpEvent(
+                idempotencyKey,
+                configuration.exchangeId(),
+                snapshot.deliveryId(),
+                snapshot.clientId(),
+                body);
+    }
+
+    /**
+     * Sends an already encoded event without regenerating its payload.
+     */
+    public CompletableFuture<Void> publishEncoded(
+            final EmporiaPortfolioHttpEvent event) {
+        Objects.requireNonNull(event, "event");
+        final URI endpoint = endpointBaseUri.resolve(
+                "internal/v1/portfolio-snapshots/"
+                        + event.deliveryId()
+                        + "/"
+                        + event.clientId());
         final HttpRequest request = request(endpoint)
                 .header("Content-Type", JSON_CONTENT_TYPE)
-                .header("Idempotency-Key", idempotencyKey)
-                .PUT(HttpRequest.BodyPublishers.ofByteArray(body))
+                .header("Idempotency-Key", event.eventId())
+                .PUT(HttpRequest.BodyPublishers.ofByteArray(
+                        event.payload()))
                 .build();
 
         return send(
                 request,
                 "publish portfolio "
-                        + snapshot.clientId()
+                        + event.clientId()
                         + " delivery "
-                        + snapshot.deliveryId(),
+                        + event.deliveryId(),
                 response -> null);
     }
 
