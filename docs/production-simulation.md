@@ -58,8 +58,8 @@ Cached duplicate responses do not count their fills or quantities twice.
 5. `adjustPortfolioBalance(...)` applies an idempotent funding transaction and
    republishes the resulting available balances.
 
-The gateway is an interface rather than a concrete HTTP or messaging client,
-so the future Emporia portfolio service can choose its transport. Published
+The gateway remains transport-neutral. A concrete asynchronous HTTP
+implementation is provided by `HttpEmporiaPortfolioGateway`. Published
 snapshots must be deduplicated by `(deliveryId, clientId)`. A failed
 publication does not roll back an exchange command; redelivering the same DMA
 request republishes the cached result and portfolio snapshots.
@@ -76,6 +76,82 @@ to re-reserve an existing order atomically.
 Native risk state and DMA lifecycle state use the same checkpoint. The
 accounting mode is stored in the lifecycle commit marker, so recovery rejects
 a mode mismatch.
+
+### Emporia HTTP adapter
+
+The adapter calls these endpoints relative to its configured base URI:
+
+```text
+GET internal/v1/portfolios/{clientId}/risk-seed
+PUT internal/v1/portfolio-snapshots/{deliveryId}/{clientId}
+```
+
+The seed response uses a balance array so numeric asset identifiers do not
+become JSON object keys:
+
+```json
+{
+  "schemaVersion": 1,
+  "clientId": 101,
+  "firstTransactionId": 7001,
+  "balances": [
+    {"assetId": 840, "amount": 50000},
+    {"assetId": 20001, "amount": 12}
+  ]
+}
+```
+
+Snapshot requests are deterministic and sort balances by asset ID:
+
+```json
+{
+  "schemaVersion": 1,
+  "exchangeId": "emporia-simulation-1",
+  "deliveryId": 13,
+  "clientId": 101,
+  "availableBalances": [
+    {"assetId": 840, "amount": 0},
+    {"assetId": 20001, "amount": 5}
+  ]
+}
+```
+
+Every snapshot request includes:
+
+```text
+Content-Type: application/json
+Accept: application/json
+Idempotency-Key: {exchangeId}:{deliveryId}:{clientId}
+```
+
+Emporia must return any `2xx` response for a new snapshot or an identical
+duplicate. It must reject reuse of the idempotency key with a different body.
+The adapter marks HTTP `408`, `429`, and `5xx` responses, plus transport
+failures, as retryable through `EmporiaHttpException.retryable()`. It does not
+retry internally.
+
+Configure and wire the adapter with credentials supplied by the runtime:
+
+```java
+var gatewayConfiguration = new EmporiaHttpGatewayConfiguration(
+        URI.create(System.getenv("EMPORIA_PORTFOLIO_BASE_URL")),
+        "emporia-simulation-1",
+        Duration.ofSeconds(3),
+        Map.of(
+                "Authorization",
+                "Bearer " + System.getenv("EMPORIA_PORTFOLIO_TOKEN")));
+
+var gateway = new HttpEmporiaPortfolioGateway(gatewayConfiguration);
+var accounting =
+        ProductionSimulationAccounting.fullEquityRisk(gateway);
+var simulation =
+        ProductionSimulation.start(configuration, accounting);
+```
+
+The `CompletableFuture` returned by `publish` completes when Emporia returns a
+successful HTTP response. For production crash safety, place a durable outbox
+behind the Emporia endpoint or replace the publisher with an outbox-backed
+gateway; HTTP success alone is not an atomic commit with exchange-core state.
 
 ## Benchmarks
 
