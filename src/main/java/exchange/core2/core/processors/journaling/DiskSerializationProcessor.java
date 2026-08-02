@@ -98,6 +98,11 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
 
         this.exchangeId = initStateCfg.getExchangeId();
         this.folder = Paths.get(diskConfig.getStorageFolder());
+        try {
+            Files.createDirectories(this.folder);
+        } catch (final IOException ex) {
+            throw new IllegalStateException("Cannot create exchange-core serialization folder: " + this.folder, ex);
+        }
         this.baseSnapshotId = initStateCfg.getSnapshotId();
         this.baseSeq = initStateCfg.getSnapshotBaseSeq();
 

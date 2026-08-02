@@ -36,7 +36,7 @@ import java.util.function.Function;
  * with the same body as a successful duplicate and reject a repeated key with
  * a different body.</p>
  */
-public final class HttpEmporiaPortfolioGateway
+public class HttpEmporiaPortfolioGateway
         implements EmporiaPortfolioGateway {
 
     private static final int SCHEMA_VERSION = 1;
