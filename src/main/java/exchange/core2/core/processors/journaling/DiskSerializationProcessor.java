@@ -465,6 +465,18 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
 
             } catch (FileNotFoundException ex) {
                 log.debug("return lastSeq={}, file not found: {}", lastSeq, ex.getMessage());
+                // Continue the journal after the files just replayed, rather
+                // than restarting its numbering. filesCounter is pre-incremented
+                // by startNewFile, so leaving it at zero here made the first
+                // command after a recovery try to create the file it had just
+                // read back, failing with "File already exists" and taking the
+                // journal - and therefore all durability - down with it.
+                //
+                // partitionCounter is the first index with no file, so this
+                // makes the next new file that index. Replay reads indices in
+                // order until one is missing, so a later recovery reads the
+                // pre-recovery files and then these, in the order written.
+                filesCounter = partitionCounter - 1;
                 return lastSeq.value;
 
             } catch (IOException ex) {

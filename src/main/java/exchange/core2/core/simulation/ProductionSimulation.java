@@ -262,6 +262,31 @@ public final class ProductionSimulation implements AutoCloseable {
     }
 
     /**
+     * Replaces the lifecycle projection with one rebuilt from an external
+     * source of truth.
+     *
+     * <p>Exists because the journal restores the matching engine but not the
+     * lifecycle: the lifecycle lives on the API side and replay drives the
+     * disruptor, so after a journalled recovery the book holds orders the
+     * lifecycle has no record of. A caller that persists order state elsewhere
+     * can close that gap by rebuilding the projection and applying it here.
+     *
+     * <p>This <strong>replaces</strong> the projection rather than merging, so
+     * it must be applied before any command is accepted. Anything already
+     * entered is discarded.
+     */
+    public void recoverLifecycle(final DmaLifecycleSnapshot snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        checkpointLock.writeLock().lock();
+        try {
+            requireOpen();
+            exchangeApi.recoverDmaLifecycle(snapshot);
+        } finally {
+            checkpointLock.writeLock().unlock();
+        }
+    }
+
+    /**
      * Drains publication lanes and returns an order-book view at that boundary.
      */
     public L2MarketData orderBook(final int symbol) {
