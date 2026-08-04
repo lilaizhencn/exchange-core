@@ -76,12 +76,23 @@ public final class ProductionSimulation implements AutoCloseable {
         final DmaLifecycleSnapshot recoveredLifecycle = recoveryCheckpointId == null
                 ? null
                 : lifecycleStore.load(recoveryCheckpointId);
-        final InitialStateConfiguration initialState = recoveryCheckpointId == null
-                ? InitialStateConfiguration.cleanStart(configuration.exchangeId())
-                : InitialStateConfiguration.fromSnapshotOnly(
-                        configuration.exchangeId(),
-                        recoveryCheckpointId,
-                        0L);
+        // With journaling on, recovery must replay the journal on top of the
+        // snapshot: the snapshot is now periodic rather than per-command, so
+        // everything accepted since the last one lives only in the journal.
+        // fromSnapshotOnly would silently discard exactly that window.
+        final boolean journaling = configuration.journalingEnabled();
+        final InitialStateConfiguration initialState;
+        if (recoveryCheckpointId == null) {
+            initialState = journaling
+                    ? InitialStateConfiguration.cleanStartJournaling(configuration.exchangeId())
+                    : InitialStateConfiguration.cleanStart(configuration.exchangeId());
+        } else {
+            initialState = journaling
+                    ? InitialStateConfiguration.lastKnownStateFromJournal(
+                            configuration.exchangeId(), recoveryCheckpointId, 0L)
+                    : InitialStateConfiguration.fromSnapshotOnly(
+                            configuration.exchangeId(), recoveryCheckpointId, 0L);
+        }
 
         exchangeCore = ExchangeCore.builder()
                 .resultsConsumer((command, sequence) -> {
@@ -94,7 +105,8 @@ public final class ProductionSimulation implements AutoCloseable {
                         .reportsQueriesCfg(ReportsQueriesConfiguration.createStandardConfig())
                         .loggingCfg(LoggingConfiguration.DEFAULT)
                         .serializationCfg(
-                                snapshotSerialization(configuration.storageDirectory()))
+                                snapshotSerialization(
+                                        configuration.storageDirectory(), journaling))
                         .build())
                 .build();
 
@@ -570,7 +582,8 @@ public final class ProductionSimulation implements AutoCloseable {
     }
 
     private static SerializationConfiguration snapshotSerialization(
-            final Path storageDirectory) {
+            final Path storageDirectory,
+            final boolean journalingEnabled) {
         final DiskSerializationProcessorConfiguration defaults =
                 DiskSerializationProcessorConfiguration.createDefaultConfig();
         final DiskSerializationProcessorConfiguration disk =
@@ -587,7 +600,7 @@ public final class ProductionSimulation implements AutoCloseable {
                         .build();
 
         return SerializationConfiguration.builder()
-                .enableJournaling(false)
+                .enableJournaling(journalingEnabled)
                 .serializationProcessorFactory(
                         exchangeConfiguration ->
                                 new DiskSerializationProcessor(

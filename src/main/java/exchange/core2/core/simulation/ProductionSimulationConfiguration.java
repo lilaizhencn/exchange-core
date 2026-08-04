@@ -8,12 +8,22 @@ import java.util.Objects;
 
 /**
  * Runtime and persistence settings for a production simulation.
+ *
+ * @param journalingEnabled write a journal (WAL) of every command, so state can
+ *                          be recovered by replaying it onto the last snapshot
+ *                          instead of snapshotting on the command path. The
+ *                          journal is a Disruptor stage running in parallel
+ *                          with risk and matching, so it costs far less than a
+ *                          synchronous snapshot. Off by default because a
+ *                          matching-only local run does not need the write
+ *                          volume.
  */
 public record ProductionSimulationConfiguration(
         String exchangeId,
         Path storageDirectory,
         int symbolPartitions,
-        PerformanceConfiguration performanceConfiguration) {
+        PerformanceConfiguration performanceConfiguration,
+        boolean journalingEnabled) {
 
     public ProductionSimulationConfiguration {
         Objects.requireNonNull(exchangeId, "exchangeId");
@@ -37,6 +47,14 @@ public record ProductionSimulationConfiguration(
             final String exchangeId,
             final Path storageDirectory,
             final int symbolPartitions) {
+        return create(exchangeId, storageDirectory, symbolPartitions, false);
+    }
+
+    public static ProductionSimulationConfiguration create(
+            final String exchangeId,
+            final Path storageDirectory,
+            final int symbolPartitions,
+            final boolean journalingEnabled) {
         return new ProductionSimulationConfiguration(
                 exchangeId,
                 storageDirectory,
@@ -48,6 +66,15 @@ public record ProductionSimulationConfiguration(
                         .msgsInGroupLimit(4_096)
                         .maxGroupDurationNs(4_000_000)
                         .orderBookFactory(OrderBookDirectImpl::new)
-                        .build());
+                        .build(),
+                journalingEnabled);
+    }
+
+    /**
+     * @return this configuration with journaling switched on.
+     */
+    public ProductionSimulationConfiguration withJournaling() {
+        return new ProductionSimulationConfiguration(
+                exchangeId, storageDirectory, symbolPartitions, performanceConfiguration, true);
     }
 }
