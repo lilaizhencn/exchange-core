@@ -82,6 +82,8 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
     private FileChannel channel;
 
     private int filesCounter = 0;
+    /** Commands a replay pushed back through the API, in this process's sequence space. */
+    private long replayedCommands;
 
     private long writtenBytes = 0;
 
@@ -261,6 +263,14 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
         final OrderCommandType cmdType = cmd.command;
 
         if (cmdType == OrderCommandType.SHUTDOWN_SIGNAL) {
+            // Nothing has been journalled yet, so there is no file to flush to.
+            // The channel is opened lazily by the first mutating command below,
+            // and this branch runs before that: without the guard a shutdown
+            // that journalled nothing throws inside the journal handler, the
+            // disruptor never drains, and the exchange fails to stop.
+            if (channel == null) {
+                return;
+            }
             flushBufferSync(false, cmd.timestamp);
             log.debug("Shutdown signal received, flushed to disk");
             return;
@@ -440,6 +450,7 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
             return baseSeq;
         }
         log.debug("Replaying journal...");
+        replayedCommands = 0;
 
 //        log.info("Read total: {} bytes ", totalBytesRead);
 
@@ -477,7 +488,12 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
                 // order until one is missing, so a later recovery reads the
                 // pre-recovery files and then these, in the order written.
                 filesCounter = partitionCounter - 1;
-                return lastSeq.value;
+                // The boundary that stops replayed commands being journalled
+                // again has to be in this process's sequence space. dSeq
+                // restarts near 1 here, so comparing it against the previous
+                // process's recorded sequence made every live command after a
+                // recovery look replayed - and silently dropped it.
+                return replayedCommands;
 
             } catch (IOException ex) {
                 partitionCounter++;
@@ -551,6 +567,9 @@ public final class DiskSerializationProcessor implements ISerializationProcessor
                 }
 
                 lastSeq.value = seq;
+                // Counted separately from lastSeq, which holds the sequence the
+                // previous process recorded and only serves gap detection.
+                replayedCommands++;
 
 //                log.debug("command seq={} {}", lastSeq, cmdType);
 

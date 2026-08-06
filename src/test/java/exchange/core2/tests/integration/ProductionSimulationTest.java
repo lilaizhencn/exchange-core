@@ -287,21 +287,15 @@ class ProductionSimulationTest {
             assertEquals(3, recovered.orderBook(AAPL_USD).askSize);
         }
 
-        // A second recovery SHOULD see all three. It sees two, because a
-        // recovered exchange does not resume journalling at all:
-        // writeToJournal skips anything with dSeq + baseSeq <=
-        // enableJournalAfterSeq, and that boundary is the sequence recorded in
-        // the *previous* process's journal while dSeq restarts near 1 in the
-        // new one. Every post-recovery command therefore looks like one being
-        // replayed, and is silently dropped from the journal.
-        //
-        // Asserted as-is so this stays visible and green rather than being
-        // forgotten; flip it to 3 when the boundary is fixed. Documented in
-        // rework/WAL_LIFECYCLE_GAP.md.
+        // A second recovery sees all three: a recovered exchange keeps
+        // journalling. The boundary suppressing re-journalling during replay is
+        // now the count of commands actually replayed, in this process's
+        // sequence space, rather than the sequence the previous process
+        // recorded.
         try (ProductionSimulation again =
                      ProductionSimulation.recover(
                              configuration, checkpoint.checkpointId())) {
-            assertEquals(2, again.orderBook(AAPL_USD).askSize);
+            assertEquals(3, again.orderBook(AAPL_USD).askSize);
         }
     }
 
