@@ -8,7 +8,7 @@ This file starts tracking from the journalling/recovery work below rather than
 reconstructing the fork's full prior history; earlier changes remain available
 via `git log`.
 
-## [0.5.5-emporia]
+## [0.5.6-emporia]
 
 Work toward making journalled (write-ahead log) recovery safe to enable,
 verified by a `kill -9` test against a running order-management-service rather

@@ -355,6 +355,24 @@ public final class ProductionSimulation implements AutoCloseable {
     }
 
     /**
+     * Reads the matching-engine order IDs currently resting for a client, for
+     * reconciliation against an external order-lifecycle record. Available
+     * regardless of accounting mode: unlike {@link #portfolioSnapshot}, this
+     * reads the matching engine's own order index, not risk-engine balances.
+     */
+    public CompletableFuture<Set<Long>> openOrderIds(final long clientId) {
+        requireOpen();
+        if (clientId <= 0) {
+            throw new IllegalArgumentException("clientId must be positive");
+        }
+
+        return exchangeApi.processReport(
+                        new SingleUserReportQuery(clientId),
+                        nextReportTransferId())
+                .thenApply(report -> report.fetchIndexedOrders().keySet());
+    }
+
+    /**
      * Applies an idempotent funding or withdrawal transaction, then publishes
      * the resulting available balances to Emporia. Retrying the same
      * transaction ID is safe when the first portfolio publication failed.
