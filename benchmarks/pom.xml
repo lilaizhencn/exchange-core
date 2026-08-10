@@ -6,7 +6,7 @@
 
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core-benchmarks</artifactId>
-    <version>0.5.4-SNAPSHOT</version>
+    <version>0.5.4-emporia</version>
     <packaging>jar</packaging>
 
     <name>exchange-core production simulation benchmarks</name>
