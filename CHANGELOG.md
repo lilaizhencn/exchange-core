@@ -2,11 +2,44 @@
 
 All notable changes to this project are documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 This file starts tracking from the journalling/recovery work below rather than
 reconstructing the fork's full prior history; earlier changes remain available
 via `git log`.
+
+## [0.5.7-emporia]
+
+### Fixed
+
+- **`portfolioSnapshot()` no longer scans the order book on every command.**
+  It only ever reads risk-engine accounts (`report.getAccounts()`), but
+  `SingleUserReportQuery` always ran both report stages, including
+  `MatchingEngineRouter`'s `findUserOrders` — an unindexed linear scan over
+  every order in the book — even though the result
+  (`report.fetchIndexedOrders()`) was never read at this call site. Under
+  `FULL_EQUITY_RISK`, every accepted command (and every fill) synchronously
+  pays for this scan before completing, so cost grew with book size: p99
+  reached 1,934ms with 50% infra failures on an ~8,300-order book at 60
+  orders/sec, most of it in `findUserOrders`/`SingleUserReportResult`/
+  `ArtNode256` per JFR. `SingleUserReportQuery` now takes an
+  `includeOpenOrders` flag (default `true`, unchanged for
+  `openOrderIds()`/reconciliation, which does need the order list);
+  `portfolioSnapshot()` passes `false` and skips the scan entirely.
+  ([cb2e35d](https://github.com/nvxtien/exchange-core/commit/cb2e35d))
+
+### Verified
+
+- `ProductionSimulationAccountingTest.portfolioSnapshotSkipsTheOrderScanWithoutLosingBalanceAccuracy`
+  — places a resting (unfilled) order, then confirms `openOrderIds()` still
+  finds it (scan path unaffected) while `portfolioSnapshot()` still reports
+  the correct risk-engine-reserved balance despite never looking at the
+  order itself.
+- JFR, identical 60 orders/sec / 60s load, before vs. after: p99 1,934ms →
+  292ms on a book *larger* than the one that produced the regression
+  (~12,900 vs. ~8,300 orders); `findUserOrders`/`SingleUserReportResult`/
+  `ArtNode256` absent from `hot-methods` entirely after the fix.
 
 ## [0.5.6-emporia]
 
