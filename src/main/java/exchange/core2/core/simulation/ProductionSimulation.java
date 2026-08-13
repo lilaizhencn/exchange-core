@@ -333,6 +333,12 @@ public final class ProductionSimulation implements AutoCloseable {
 
     /**
      * Reads the available risk-engine balances at a command boundary.
+     *
+     * <p>Skips the matching engine's per-order scan
+     * ({@code includeOpenOrders=false}): {@link #toPortfolioSnapshot} only
+     * reads risk-engine accounts, never the order list, so scanning every
+     * resting order in the book here would cost O(book size) per command for
+     * a result nobody reads.
      */
     public CompletableFuture<EmporiaPortfolioSnapshot> portfolioSnapshot(
             final long clientId,
@@ -348,7 +354,7 @@ public final class ProductionSimulation implements AutoCloseable {
         }
 
         return exchangeApi.processReport(
-                        new SingleUserReportQuery(clientId),
+                        new SingleUserReportQuery(clientId, false),
                         nextReportTransferId())
                 .thenApply(report ->
                         toPortfolioSnapshot(deliveryId, clientId, report));

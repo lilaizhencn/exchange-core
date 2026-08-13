@@ -37,16 +37,33 @@ public final class SingleUserReportQuery implements ReportQuery<SingleUserReport
 
     private final long uid;
 
+    // Whether process(MatchingEngineRouter) should scan the order books for
+    // this user's resting orders. Callers that only need risk-engine balances
+    // (e.g. a post-command portfolio sync) can skip it: findUserOrders is an
+    // unindexed linear scan over every order in the book, so paying for it on
+    // every command scales with book size for a result nobody reads.
+    private final boolean includeOpenOrders;
+
     public SingleUserReportQuery(long uid) {
+        this(uid, true);
+    }
+
+    public SingleUserReportQuery(long uid, boolean includeOpenOrders) {
         this.uid = uid;
+        this.includeOpenOrders = includeOpenOrders;
     }
 
     public SingleUserReportQuery(final BytesIn bytesIn) {
         this.uid = bytesIn.readLong();
+        this.includeOpenOrders = bytesIn.readBoolean();
     }
 
     public long getUid() {
         return uid;
+    }
+
+    public boolean isIncludeOpenOrders() {
+        return includeOpenOrders;
     }
 
     @Override
@@ -63,13 +80,15 @@ public final class SingleUserReportQuery implements ReportQuery<SingleUserReport
     public Optional<SingleUserReportResult> process(final MatchingEngineRouter matchingEngine) {
         final IntObjectHashMap<List<Order>> orders = new IntObjectHashMap<>();
 
-        matchingEngine.getOrderBooks().forEach(ob -> {
-            final List<Order> userOrders = ob.findUserOrders(this.uid);
-            // dont put empty results, so that the report result merge procedure would be simple
-            if (!userOrders.isEmpty()) {
-                orders.put(ob.getSymbolSpec().symbolId, userOrders);
-            }
-        });
+        if (includeOpenOrders) {
+            matchingEngine.getOrderBooks().forEach(ob -> {
+                final List<Order> userOrders = ob.findUserOrders(this.uid);
+                // dont put empty results, so that the report result merge procedure would be simple
+                if (!userOrders.isEmpty()) {
+                    orders.put(ob.getSymbolSpec().symbolId, userOrders);
+                }
+            });
+        }
 
         //log.debug("ME{}: orders: {}", matchingEngine.getShardId(), orders);
         return Optional.of(SingleUserReportResult.createFromMatchingEngine(uid, orders));
@@ -109,5 +128,6 @@ public final class SingleUserReportQuery implements ReportQuery<SingleUserReport
     @Override
     public void writeMarshallable(final BytesOut bytes) {
         bytes.writeLong(uid);
+        bytes.writeBoolean(includeOpenOrders);
     }
 }

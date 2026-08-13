@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
@@ -39,6 +40,7 @@ class ProductionSimulationAccountingTest {
     private static final long BUYER = 101;
     private static final long SELLER = 102;
     private static final long UNDERFUNDED_BUYER = 103;
+    private static final long RESTING_SELLER = 104;
 
     private static final CoreSymbolSpecification AAPL =
             CoreSymbolSpecification.builder()
@@ -208,6 +210,68 @@ class ProductionSimulationAccountingTest {
             assertTrue(recovered.submitProtected(buy).join()
                     .lifecycleResult()
                     .duplicateDelivery());
+        }
+    }
+
+    /**
+     * portfolioSnapshot() asks SingleUserReportQuery to skip the matching
+     * engine's order-book scan (includeOpenOrders=false), since it only ever
+     * reads risk-engine accounts. This test proves that shortcut is safe with
+     * an order that actually rests unfilled: openOrderIds() (which does scan)
+     * must still see it, and portfolioSnapshot() (which does not) must still
+     * report the correct risk-engine-reserved balance despite never looking
+     * at the order itself.
+     */
+    @Test
+    @Timeout(30)
+    void portfolioSnapshotSkipsTheOrderScanWithoutLosingBalanceAccuracy()
+            throws IOException {
+        final RecordingPortfolioGateway gateway =
+                new RecordingPortfolioGateway(Map.of(
+                        RESTING_SELLER,
+                        seed(RESTING_SELLER, Map.of(AAPL_ASSET, 5L))));
+        final ProductionSimulationAccounting accounting =
+                ProductionSimulationAccounting.fullEquityRisk(gateway);
+        final ProductionSimulationConfiguration configuration =
+                ProductionSimulationConfiguration.create(
+                        "full-equity-risk",
+                        storageDirectory,
+                        2);
+        // No counter-order exists for this order, so it rests fully unfilled.
+        final DmaLimitOrder restingSell = new DmaLimitOrder(
+                31,
+                3_001,
+                RESTING_SELLER,
+                AAPL_USD,
+                OrderAction.ASK,
+                100,
+                5);
+
+        try (ProductionSimulation simulation =
+                     ProductionSimulation.start(configuration, accounting)) {
+            simulation.addSymbols(List.of(AAPL));
+            simulation.onboardPortfolio(RESTING_SELLER).join();
+
+            assertEquals(
+                    CommandResultCode.SUCCESS,
+                    simulation.submit(restingSell).join()
+                            .lifecycleResult()
+                            .commandResult()
+                            .resultCode());
+
+            // The scanning path still finds the resting order.
+            assertEquals(
+                    Set.of(restingSell.orderId()),
+                    simulation.openOrderIds(RESTING_SELLER).join());
+
+            // The non-scanning path still reports the correct reserved
+            // balance (the full ask amount held at placement time, before
+            // any fill) without ever looking at the order it belongs to.
+            assertEquals(
+                    Map.of(AAPL_ASSET, 0L),
+                    simulation.portfolioSnapshot(RESTING_SELLER, 31)
+                            .join()
+                            .availableBalances());
         }
     }
 
