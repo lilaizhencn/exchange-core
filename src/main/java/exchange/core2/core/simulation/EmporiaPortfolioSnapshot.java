@@ -9,7 +9,20 @@ import java.util.Objects;
 public record EmporiaPortfolioSnapshot(
         long deliveryId,
         long clientId,
-        Map<Integer, Long> availableBalances) {
+        Map<Integer, Long> availableBalances,
+        EmporiaPortfolioChange change) {
+
+    /**
+     * Defaults to {@link EmporiaPortfolioChange#SETTLED}, the conservative
+     * choice: a snapshot of unstated kind is never collapsed away.
+     */
+    public EmporiaPortfolioSnapshot(
+            final long deliveryId,
+            final long clientId,
+            final Map<Integer, Long> availableBalances) {
+        this(deliveryId, clientId, availableBalances,
+                EmporiaPortfolioChange.SETTLED);
+    }
 
     public EmporiaPortfolioSnapshot {
         if (deliveryId < 0) {
@@ -20,6 +33,7 @@ public record EmporiaPortfolioSnapshot(
             throw new IllegalArgumentException("clientId must be positive");
         }
         Objects.requireNonNull(availableBalances, "availableBalances");
+        Objects.requireNonNull(change, "change");
         availableBalances = Map.copyOf(availableBalances);
     }
 }

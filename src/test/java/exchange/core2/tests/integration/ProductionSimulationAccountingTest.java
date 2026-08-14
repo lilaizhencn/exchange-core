@@ -8,6 +8,7 @@ import exchange.core2.core.common.api.dma.DmaOrderStatus;
 import exchange.core2.core.common.api.dma.DmaProtectedMarketOrder;
 import exchange.core2.core.common.api.dma.DmaReplaceOrder;
 import exchange.core2.core.common.cmd.CommandResultCode;
+import exchange.core2.core.simulation.EmporiaPortfolioChange;
 import exchange.core2.core.simulation.EmporiaPortfolioGateway;
 import exchange.core2.core.simulation.EmporiaPortfolioSeed;
 import exchange.core2.core.simulation.EmporiaPortfolioSnapshot;
@@ -275,6 +276,50 @@ class ProductionSimulationAccountingTest {
         }
     }
 
+    /**
+     * A command that only reserves margin is not a settled change, so it must
+     * not be published as one - publishing every accepted order as settled is
+     * what let the outbox grow faster than it could drain, and it would also
+     * put a hold-adjusted figure into the balance the risk seed is taken from.
+     */
+    @Test
+    @Timeout(30)
+    void classifiesRestingOrdersAsReservedAndFillsAsSettled()
+            throws IOException {
+        final RecordingPortfolioGateway gateway =
+                new RecordingPortfolioGateway(Map.of(
+                        BUYER, seed(BUYER, Map.of(USD, 500L)),
+                        SELLER, seed(SELLER, Map.of(AAPL_ASSET, 5L))));
+        final ProductionSimulationConfiguration configuration =
+                ProductionSimulationConfiguration.create(
+                        "full-equity-risk", storageDirectory, 2);
+
+        try (ProductionSimulation simulation = ProductionSimulation.start(
+                configuration,
+                ProductionSimulationAccounting.fullEquityRisk(gateway))) {
+            simulation.addSymbols(List.of(AAPL));
+            simulation.onboardPortfolio(BUYER).join();
+            simulation.onboardPortfolio(SELLER).join();
+
+            // Rests: no counter-liquidity, so nothing settles.
+            simulation.submit(new DmaLimitOrder(
+                    41, 4_001, SELLER, AAPL_USD, OrderAction.ASK, 100, 5)).join();
+            assertEquals(
+                    EmporiaPortfolioChange.RESERVED,
+                    gateway.lastChangeFor(SELLER));
+
+            // Trades against the resting order: settles for both sides.
+            simulation.submitProtected(new DmaProtectedMarketOrder(
+                    42, 4_002, BUYER, AAPL_USD, OrderAction.BID, 100, 5)).join();
+            assertEquals(
+                    EmporiaPortfolioChange.SETTLED,
+                    gateway.lastChangeFor(BUYER));
+            assertEquals(
+                    EmporiaPortfolioChange.SETTLED,
+                    gateway.lastChangeFor(SELLER));
+        }
+    }
+
     private static EmporiaPortfolioSeed seed(
             final long clientId,
             final Map<Integer, Long> balances) {
@@ -318,6 +363,16 @@ class ProductionSimulationAccountingTest {
                 published.add(snapshot);
             }
             return CompletableFuture.completedFuture(null);
+        }
+
+        private synchronized EmporiaPortfolioChange lastChangeFor(
+                final long clientId) {
+            return published.stream()
+                    .filter(snapshot -> snapshot.clientId() == clientId)
+                    .reduce((first, second) -> second)
+                    .map(EmporiaPortfolioSnapshot::change)
+                    .orElseThrow(() -> new AssertionError(
+                            "no snapshot published for client " + clientId));
         }
 
         private synchronized void failOnce(

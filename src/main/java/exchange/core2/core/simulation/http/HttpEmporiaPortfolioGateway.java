@@ -126,6 +126,7 @@ public class HttpEmporiaPortfolioGateway
                 configuration.exchangeId(),
                 snapshot.deliveryId(),
                 snapshot.clientId(),
+                snapshot.change(),
                 body);
     }
 
@@ -354,6 +355,7 @@ public class HttpEmporiaPortfolioGateway
             String exchangeId,
             long deliveryId,
             long clientId,
+            String change,
             List<Balance> availableBalances) {
 
         private static SnapshotRequest from(
@@ -372,6 +374,7 @@ public class HttpEmporiaPortfolioGateway
                     exchangeId,
                     snapshot.deliveryId(),
                     snapshot.clientId(),
+                    snapshot.change().name(),
                     List.copyOf(balances));
         }
     }

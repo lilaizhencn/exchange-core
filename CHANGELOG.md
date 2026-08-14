@@ -9,6 +9,38 @@ This file starts tracking from the journalling/recovery work below rather than
 reconstructing the fork's full prior history; earlier changes remain available
 via `git log`.
 
+## [0.5.8-emporia]
+
+### Fixed
+
+- **The portfolio outbox no longer grows faster than it can drain.** Every
+  accepted command published a balance snapshot, settled or not, so the queue
+  filled at order-flow rate while it could only empty at delivery rate. Measured
+  at 120 orders/sec for ten minutes: **72,002 rows enqueued, 248 delivered**, and
+  the claim query's per-client anti-join reached **2,271 ms** once ~72k rows were
+  pending - 71,753 subquery loops per call - which held a Postgres core at 102%
+  indefinitely. Snapshots are now classified: `SETTLED` (a fill, or a funding
+  adjustment) is delivered and acknowledged individually and is never collapsed,
+  because each one is an audit record; `RESERVED` (margin moving on an order
+  that has not traded) supersedes this client's earlier undelivered reservation,
+  since only the newest one carries anything. Re-measured on the same workload:
+  **0 pending, 100% resolved, Postgres back to 0.88%**.
+  ([EmporiaPortfolioChange](https://github.com/nvxtien/exchange-core))
+
+- **Enqueue is single-threaded.** Superseding compares `sequence_id`, so
+  insertion order has to match the order snapshots were produced in. With the
+  previous two-thread pool a newer snapshot could be written first and then
+  superseded by an older one, publishing a stale balance.
+
+### Verified
+
+- `PostgresPortfolioOutboxSpec`: reservations collapse to one pending row per
+  client; settled changes never collapse; a reservation does not supersede an
+  undelivered settled change; superseding is scoped to one client; a published
+  reservation is not revived.
+- `ProductionSimulationAccountingTest`: a resting order classifies as
+  `RESERVED`, a trade classifies as `SETTLED` for taker and every maker.
+
 ## [0.5.7-emporia]
 
 ### Fixed

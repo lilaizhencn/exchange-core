@@ -343,6 +343,19 @@ public final class ProductionSimulation implements AutoCloseable {
     public CompletableFuture<EmporiaPortfolioSnapshot> portfolioSnapshot(
             final long clientId,
             final long deliveryId) {
+        return portfolioSnapshot(clientId, deliveryId,
+                EmporiaPortfolioChange.SETTLED);
+    }
+
+    /**
+     * As {@link #portfolioSnapshot(long, long)}, but states what kind of change
+     * produced the snapshot so the delivery path knows whether an undelivered
+     * older one may be superseded by it.
+     */
+    public CompletableFuture<EmporiaPortfolioSnapshot> portfolioSnapshot(
+            final long clientId,
+            final long deliveryId,
+            final EmporiaPortfolioChange change) {
         requireFullEquityRisk();
         requireOpen();
         if (clientId <= 0) {
@@ -352,12 +365,13 @@ public final class ProductionSimulation implements AutoCloseable {
             throw new IllegalArgumentException(
                     "deliveryId must not be negative");
         }
+        Objects.requireNonNull(change, "change");
 
         return exchangeApi.processReport(
                         new SingleUserReportQuery(clientId, false),
                         nextReportTransferId())
                 .thenApply(report ->
-                        toPortfolioSnapshot(deliveryId, clientId, report));
+                        toPortfolioSnapshot(deliveryId, clientId, report, change));
     }
 
     /**
@@ -563,6 +577,21 @@ public final class ProductionSimulation implements AutoCloseable {
             return CompletableFuture.completedFuture(null);
         }
 
+        // A command that traded settled something for everyone it touched, and
+        // each of those has to be delivered and acknowledged on its own. A
+        // command that only rested or cancelled moved a margin reservation for
+        // the one client who issued it: that changes what they can still spend,
+        // so a live view needs it, but only the newest one carries information
+        // and an undelivered older one may be superseded on the way out.
+        //
+        // Publishing every command as if it settled is what let the outbox grow
+        // faster than it could drain: order flow far exceeds trade flow, so the
+        // reservations alone outran delivery and the backlog never recovered.
+        final boolean traded = !lifecycleResult.commandResult().fills().isEmpty();
+        final EmporiaPortfolioChange change = traded
+                ? EmporiaPortfolioChange.SETTLED
+                : EmporiaPortfolioChange.RESERVED;
+
         final Set<Long> affectedClients = new TreeSet<>();
         affectedClients.add(lifecycleResult.orderState().order().clientId());
         lifecycleResult.commandResult().fills().forEach(
@@ -573,7 +602,8 @@ public final class ProductionSimulation implements AutoCloseable {
         for (final long clientId : affectedClients) {
             publications.add(portfolioSnapshot(
                             clientId,
-                            lifecycleResult.deliveryId())
+                            lifecycleResult.deliveryId(),
+                            change)
                     .thenCompose(snapshot -> Objects.requireNonNull(
                             accounting.portfolioGateway().publish(snapshot),
                             "portfolio publish future")));
@@ -590,7 +620,8 @@ public final class ProductionSimulation implements AutoCloseable {
     private static EmporiaPortfolioSnapshot toPortfolioSnapshot(
             final long deliveryId,
             final long clientId,
-            final SingleUserReportResult report) {
+            final SingleUserReportResult report,
+            final EmporiaPortfolioChange change) {
         if (report.getQueryExecutionStatus()
                 != SingleUserReportResult.QueryExecutionStatus.OK
                 || report.getAccounts() == null) {
@@ -603,7 +634,8 @@ public final class ProductionSimulation implements AutoCloseable {
         return new EmporiaPortfolioSnapshot(
                 deliveryId,
                 clientId,
-                balances);
+                balances,
+                change);
     }
 
     private static void requireCommandSuccess(

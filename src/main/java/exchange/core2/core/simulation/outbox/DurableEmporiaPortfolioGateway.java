@@ -52,8 +52,13 @@ public final class DurableEmporiaPortfolioGateway
                         httpGateway,
                         configuration);
         final ExecutorService databaseExecutor =
+                // Single thread on purpose: superseding compares sequence_id,
+                // so insertion order has to match the order snapshots were
+                // produced in. With two threads a newer snapshot could be
+                // written first and then superseded by an older one, publishing
+                // a stale balance.
                 Executors.newFixedThreadPool(
-                        2,
+                        1,
                         task -> {
                             final Thread thread = new Thread(
                                     task,

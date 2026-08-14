@@ -1,5 +1,7 @@
 package exchange.core2.core.simulation.http;
 
+import exchange.core2.core.simulation.EmporiaPortfolioChange;
+
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -14,6 +16,7 @@ public record EmporiaPortfolioHttpEvent(
         String exchangeId,
         long deliveryId,
         long clientId,
+        EmporiaPortfolioChange change,
         byte[] payload) {
 
     public EmporiaPortfolioHttpEvent {
@@ -31,6 +34,7 @@ public record EmporiaPortfolioHttpEvent(
         if (clientId <= 0) {
             throw new IllegalArgumentException("clientId must be positive");
         }
+        Objects.requireNonNull(change, "change");
         Objects.requireNonNull(payload, "payload");
         if (payload.length == 0) {
             throw new IllegalArgumentException("payload must not be empty");

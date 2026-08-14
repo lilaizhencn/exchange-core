@@ -1,5 +1,6 @@
 package exchange.core2.core.simulation.outbox;
 
+import exchange.core2.core.simulation.EmporiaPortfolioChange;
 import exchange.core2.core.simulation.http.EmporiaPortfolioHttpEvent;
 
 import javax.sql.DataSource;
@@ -41,6 +42,7 @@ public final class PostgresPortfolioOutbox
 
         inTransaction(connection -> {
             final int inserted;
+            final long insertedSequenceId;
             try (PreparedStatement statement = connection.prepareStatement(
                     """
                     INSERT INTO exchange_core_portfolio_outbox (
@@ -50,10 +52,12 @@ public final class PostgresPortfolioOutbox
                         client_id,
                         schema_version,
                         payload,
-                        payload_sha256
+                        payload_sha256,
+                        change_kind
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (event_id) DO NOTHING
+                    RETURNING sequence_id
                     """)) {
                 statement.setString(1, event.eventId());
                 statement.setString(2, event.exchangeId());
@@ -62,13 +66,58 @@ public final class PostgresPortfolioOutbox
                 statement.setInt(5, SCHEMA_VERSION);
                 statement.setBytes(6, payload);
                 statement.setString(7, digest);
-                inserted = statement.executeUpdate();
+                statement.setString(8, event.change().name());
+                try (ResultSet keys = statement.executeQuery()) {
+                    if (keys.next()) {
+                        inserted = 1;
+                        insertedSequenceId = keys.getLong(1);
+                    } else {
+                        inserted = 0;
+                        insertedSequenceId = 0L;
+                    }
+                }
             }
             if (inserted == 0) {
                 verifyDuplicate(connection, event, payload, digest);
+                return null;
+            }
+            if (event.change() == EmporiaPortfolioChange.RESERVED) {
+                supersedeEarlierReservations(
+                        connection, event.clientId(), insertedSequenceId);
             }
             return null;
         });
+    }
+
+    /**
+     * Marks this client's earlier undelivered reservation snapshots as
+     * superseded, leaving at most one pending per client.
+     *
+     * <p>Sound only because a snapshot carries the client's whole balance, not
+     * a delta: the newest one alone reproduces the state every older one was
+     * describing. Settled changes are never touched here - each of those has to
+     * be delivered and acknowledged on its own.
+     *
+     * <p>Guarded on {@code sequence_id <} the row just written so two enqueues
+     * racing for the same client cannot supersede each other's newer row.
+     */
+    private void supersedeEarlierReservations(
+            final Connection connection,
+            final long clientId,
+            final long insertedSequenceId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                """
+                UPDATE exchange_core_portfolio_outbox
+                   SET status = 'SUPERSEDED'
+                 WHERE client_id = ?
+                   AND change_kind = 'RESERVED'
+                   AND status = 'PENDING'
+                   AND sequence_id < ?
+                """)) {
+            statement.setLong(1, clientId);
+            statement.setLong(2, insertedSequenceId);
+            statement.executeUpdate();
+        }
     }
 
     @Override
@@ -129,6 +178,7 @@ public final class PostgresPortfolioOutbox
                         claimed.delivery_id,
                         claimed.client_id,
                         claimed.payload,
+                        claimed.change_kind,
                         claimed.attempt_count
                     """)) {
                 statement.setTimestamp(1, Timestamp.from(now));
@@ -272,6 +322,8 @@ public final class PostgresPortfolioOutbox
                         result.getString("exchange_id"),
                         result.getLong("delivery_id"),
                         result.getLong("client_id"),
+                        EmporiaPortfolioChange.valueOf(
+                                result.getString("change_kind")),
                         result.getBytes("payload")),
                 result.getInt("attempt_count"));
     }
