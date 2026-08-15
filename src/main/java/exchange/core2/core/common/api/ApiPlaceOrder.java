@@ -40,7 +40,7 @@ public final class ApiPlaceOrder extends ApiCommand {
     @Override
     public String toString() {
         return "[ADD o" + orderId + " s" + symbol + " u" + uid + " " + (action == OrderAction.ASK ? 'A' : 'B')
-                + ":" + (orderType == OrderType.IOC ? "IOC" : "GTC")
+                + ":" + orderType
                 + ":" + price + ":" + size + "]";
         //(reservePrice != 0 ? ("(R" + reservePrice + ")") : "") +
     }

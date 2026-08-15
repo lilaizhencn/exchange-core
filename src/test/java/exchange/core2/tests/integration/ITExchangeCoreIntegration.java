@@ -281,6 +281,43 @@ public abstract class ITExchangeCoreIntegration {
 
     @Test
     @Timeout(5)
+    public void exchangeRiskGtxRejectReleasesFunds() throws Exception {
+
+        try (final ExchangeTestContainer container = ExchangeTestContainer.create(getPerformanceConfiguration())) {
+            container.initBasicSymbols();
+            container.createUserWithMoney(UID_1, CURRENECY_ETH, 700_000);
+            container.createUserWithMoney(UID_2, CURRENECY_XBT, 2_100_000);
+
+            container.submitCommandSync(
+                    ApiPlaceOrder.builder().uid(UID_1).orderId(301).price(30_000).size(7)
+                            .action(ASK).orderType(GTC).symbol(SYMBOL_EXCHANGE).build(),
+                    CHECK_SUCCESS);
+
+            container.submitCommandSync(
+                    ApiPlaceOrder.builder().uid(UID_2).orderId(302).price(30_000).reservePrice(30_000).size(7)
+                            .action(OrderAction.BID).orderType(OrderType.GTX).symbol(SYMBOL_EXCHANGE).build(),
+                    cmd -> {
+                        assertThat(cmd.resultCode, is(CommandResultCode.MATCHING_POST_ONLY_FAILED));
+                        assertThat(cmd.orderType, is(OrderType.GTX));
+                        assertNotNull(cmd.matcherEvent);
+                        assertThat(cmd.matcherEvent.eventType, is(MatcherEventType.REJECT));
+                        assertThat(cmd.matcherEvent.size, is(7L));
+                    });
+
+            container.validateUserState(UID_2, profile -> {
+                assertThat(profile.getAccounts().get(CURRENECY_XBT), is(2_100_000L));
+                assertTrue(profile.fetchIndexedOrders().isEmpty());
+            });
+            container.validateUserState(UID_1, profile -> {
+                assertThat(profile.getAccounts().get(CURRENECY_ETH), is(0L));
+                assertTrue(profile.fetchIndexedOrders().containsKey(301L));
+            });
+            assertTrue(container.totalBalanceReport().isGlobalBalancesAllZero());
+        }
+    }
+
+    @Test
+    @Timeout(5)
     public void exchangeRiskMoveTest() throws Exception {
 
         try (final ExchangeTestContainer container = ExchangeTestContainer.create(getPerformanceConfiguration())) {

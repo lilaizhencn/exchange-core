@@ -23,6 +23,8 @@ public enum OrderType {
     // Good till Cancel - equivalent to regular limit order
     GTC(0),
 
+    GTX(5),
+
     // Immediate or Cancel - equivalent to strict-risk market order
     IOC(1), // with price cap
     IOC_BUDGET(2), // with total amount cap
@@ -49,6 +51,8 @@ public enum OrderType {
                 return FOK;
             case 4:
                 return FOK_BUDGET;
+            case 5:
+                return GTX;
             default:
                 throw new IllegalArgumentException("unknown OrderType:" + code);
         }

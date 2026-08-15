@@ -88,6 +88,9 @@ public final class OrderBookNaiveImpl implements IOrderBook {
             case GTC:
                 newOrderPlaceGtc(cmd);
                 break;
+            case GTX:
+                newOrderPlaceGtx(cmd);
+                break;
             case IOC:
                 newOrderMatchIoc(cmd);
                 break;
@@ -99,6 +102,16 @@ public final class OrderBookNaiveImpl implements IOrderBook {
                 log.warn("Unsupported order type: {}", cmd);
                 eventsHelper.attachRejectEvent(cmd, cmd.size);
         }
+    }
+
+    private void newOrderPlaceGtx(final OrderCommand cmd) {
+        if (!subtreeForMatching(cmd.action, cmd.price).isEmpty()) {
+            cmd.resultCode = CommandResultCode.MATCHING_POST_ONLY_FAILED;
+            eventsHelper.attachRejectEvent(cmd, cmd.size);
+            return;
+        }
+
+        newOrderPlaceGtc(cmd);
     }
 
     private void newOrderPlaceGtc(final OrderCommand cmd) {

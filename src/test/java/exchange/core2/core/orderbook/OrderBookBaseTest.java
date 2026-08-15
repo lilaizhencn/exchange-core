@@ -174,6 +174,40 @@ public abstract class OrderBookBaseTest {
         //        log.debug("{}", dumpOrderBook(snapshot));
     }
 
+    @Test
+    public void shouldAddGtxOrderWhenItDoesNotCross() {
+        final OrderCommand bid = OrderCommand.newOrder(GTX, 93, UID_2, 81594, MAX_PRICE, 10, BID);
+        processAndValidate(bid, SUCCESS);
+        assertNotNull(orderBook.getOrderById(93));
+        assertTrue(bid.extractEvents().isEmpty());
+
+        final OrderCommand ask = OrderCommand.newOrder(GTX, 94, UID_2, 81601, 0, 10, ASK);
+        processAndValidate(ask, SUCCESS);
+        assertNotNull(orderBook.getOrderById(94));
+        assertTrue(ask.extractEvents().isEmpty());
+    }
+
+    @Test
+    public void shouldRejectGtxOrderAtomicallyWhenItCrosses() {
+        final L2MarketData initialState = orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE);
+
+        final OrderCommand bid = OrderCommand.newOrder(GTX, 93, UID_2, 81600, MAX_PRICE, 10, BID);
+        processAndValidate(bid, MATCHING_POST_ONLY_FAILED);
+        assertNull(orderBook.getOrderById(93));
+        assertEquals(initialState, orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE));
+        final List<MatcherTradeEvent> bidEvents = bid.extractEvents();
+        assertThat(bidEvents.size(), is(1));
+        checkEventRejection(bidEvents.get(0), 10, 81600, MAX_PRICE);
+
+        final OrderCommand ask = OrderCommand.newOrder(GTX, 94, UID_2, 81593, 0, 10, ASK);
+        processAndValidate(ask, MATCHING_POST_ONLY_FAILED);
+        assertNull(orderBook.getOrderById(94));
+        assertEquals(initialState, orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE));
+        final List<MatcherTradeEvent> askEvents = ask.extractEvents();
+        assertThat(askEvents.size(), is(1));
+        checkEventRejection(askEvents.get(0), 10, 81593, 0L);
+    }
+
     /**
      * Ignore order with duplicate orderId
      */

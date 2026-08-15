@@ -65,7 +65,7 @@ Benchmark configuration:
 - Two different risk processing modes (specified per symbol): fully funded cash-market (currency pairs and equities) and margin-trade.
 - Maker/taker fees (defined in quote currency units).
 - Two order books implementations: simple implementation ("Naive") and performance implementation ("Direct").
-- Order types: Immediate-or-Cancel (IOC), Good-till-Cancel (GTC), Fill-or-Kill Budget (FOK-B)
+- Order types: Good-till-Crossing post-only (GTX), Immediate-or-Cancel (IOC), Good-till-Cancel (GTC), Fill-or-Kill Budget (FOK-B)
 - Testing - unit-tests, integration tests, stress tests, integrity/consistency tests.
 - Low GC pressure, objects pooling, single ring-buffer.
 - Threads affinity (requires JNA).

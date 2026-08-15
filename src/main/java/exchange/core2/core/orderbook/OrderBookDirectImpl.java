@@ -107,6 +107,9 @@ public final class OrderBookDirectImpl implements IOrderBook {
             case GTC:
                 newOrderPlaceGtc(cmd);
                 break;
+            case GTX:
+                newOrderPlaceGtx(cmd);
+                break;
             case IOC:
                 newOrderMatchIoc(cmd);
                 break;
@@ -118,6 +121,20 @@ public final class OrderBookDirectImpl implements IOrderBook {
                 log.warn("Unsupported order type: {}", cmd);
                 eventsHelper.attachRejectEvent(cmd, cmd.size);
         }
+    }
+
+    private void newOrderPlaceGtx(final OrderCommand cmd) {
+        final boolean marketable = cmd.action == OrderAction.BID
+                ? bestAskOrder != null && bestAskOrder.price <= cmd.price
+                : bestBidOrder != null && bestBidOrder.price >= cmd.price;
+
+        if (marketable) {
+            cmd.resultCode = CommandResultCode.MATCHING_POST_ONLY_FAILED;
+            eventsHelper.attachRejectEvent(cmd, cmd.size);
+            return;
+        }
+
+        newOrderPlaceGtc(cmd);
     }
 
 

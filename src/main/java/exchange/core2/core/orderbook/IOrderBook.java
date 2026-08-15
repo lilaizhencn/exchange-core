@@ -38,7 +38,8 @@ public interface IOrderBook extends WriteBytesMarshallable, StateHash {
      * order will be matched to existing opposite GTC orders from the order book.
      * In case of remaining volume (order was not matched completely):
      * IOC - reject it as partially filled.
-     * GTC - place as a new limit order into th order book.
+     * GTC/GTX - place as a new limit order into the order book. GTX rejects
+     * the entire order when it would cross the opposite side.
      * <p>
      * Rejection chain attached in case of error (to simplify risk handling)
      *
@@ -207,7 +208,9 @@ public interface IOrderBook extends WriteBytesMarshallable, StateHash {
 
             if (cmd.resultCode == CommandResultCode.VALID_FOR_MATCHING_ENGINE) {
                 orderBook.newOrder(cmd);
-                return CommandResultCode.SUCCESS;
+                return cmd.resultCode == CommandResultCode.MATCHING_POST_ONLY_FAILED
+                        ? CommandResultCode.MATCHING_POST_ONLY_FAILED
+                        : CommandResultCode.SUCCESS;
             } else {
                 return cmd.resultCode; // no change
             }
