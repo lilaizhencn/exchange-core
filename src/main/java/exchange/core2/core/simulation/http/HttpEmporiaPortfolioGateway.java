@@ -1,12 +1,12 @@
 package exchange.core2.core.simulation.http;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectMapper;
 import exchange.core2.core.simulation.EmporiaPortfolioGateway;
 import exchange.core2.core.simulation.EmporiaPortfolioSeed;
 import exchange.core2.core.simulation.EmporiaPortfolioSnapshot;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -115,7 +115,7 @@ public class HttpEmporiaPortfolioGateway
                     SnapshotRequest.from(
                             configuration.exchangeId(),
                             snapshot));
-        } catch (final IOException error) {
+        } catch (final JacksonException error) {
             throw protocolFailure(
                     "encode portfolio snapshot",
                     error);
@@ -192,7 +192,7 @@ public class HttpEmporiaPortfolioGateway
             seed = objectMapper.readValue(
                     response.body(),
                     SeedResponse.class);
-        } catch (final IOException error) {
+        } catch (final JacksonException error) {
             throw protocolFailure(
                     "decode portfolio " + requestedClientId,
                     error);
@@ -332,10 +332,11 @@ public class HttpEmporiaPortfolioGateway
     }
 
     private static ObjectMapper defaultObjectMapper() {
-        return new ObjectMapper()
+        return new ObjectMapper().rebuild()
                 .disable(
                         DeserializationFeature
-                                .FAIL_ON_UNKNOWN_PROPERTIES);
+                                .FAIL_ON_UNKNOWN_PROPERTIES)
+                .build();
     }
 
     private record Balance(
