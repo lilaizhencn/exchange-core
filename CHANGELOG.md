@@ -9,6 +9,14 @@ This file starts tracking from the journalling/recovery work below rather than
 reconstructing the fork's full prior history; earlier changes remain available
 via `git log`.
 
+## [0.5.15-emporia]
+
+### Security
+
+- Compile and package from an immutable archive of the attested clean Git commit.
+- Re-attest the repository and packaged provenance after the executable JAR is created, rejecting source or HEAD
+  changes made during the build.
+
 ## [0.5.14-emporia]
 
 ### Added

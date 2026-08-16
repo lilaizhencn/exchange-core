@@ -4,7 +4,7 @@
 
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core</artifactId>
-    <version>0.5.14-emporia</version>
+    <version>0.5.15-emporia</version>
     <packaging>jar</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
@@ -338,6 +338,18 @@
     </dependencies>
 
     <build>
+        <sourceDirectory>${project.build.directory}/fork-source-tree/src/main/java</sourceDirectory>
+        <testSourceDirectory>${project.build.directory}/fork-source-tree/src/test/java</testSourceDirectory>
+        <resources>
+            <resource>
+                <directory>${project.build.directory}/fork-source-tree/src/main/resources</directory>
+            </resource>
+        </resources>
+        <testResources>
+            <testResource>
+                <directory>${project.build.directory}/fork-source-tree/src/test/resources</directory>
+            </testResource>
+        </testResources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -345,8 +357,8 @@
                 <version>3.2.0</version>
                 <executions>
                     <execution>
-                        <id>stamp-clean-fork-provenance</id>
-                        <phase>generate-resources</phase>
+                        <id>export-clean-fork-source</id>
+                        <phase>validate</phase>
                         <goals>
                             <goal>run</goal>
                         </goals>
@@ -372,10 +384,87 @@
                                 </condition>
                                 <fail unless="fork.git.clean"
                                       message="exchange-core artifact must be built from a clean Git worktree"/>
+                                <echo file="${project.build.directory}/fork-git-sha.txt"
+                                      encoding="UTF-8" message="${fork.git.sha}"/>
+                                <delete dir="${project.build.directory}/fork-source-tree" quiet="true"/>
+                                <delete file="${project.build.directory}/fork-source-tree.zip" quiet="true"/>
+                                <exec executable="git" dir="${project.basedir}" failonerror="true"
+                                      failifexecutionfails="true">
+                                    <arg value="archive"/>
+                                    <arg value="--format=zip"/>
+                                    <arg value="--output=${project.build.directory}/fork-source-tree.zip"/>
+                                    <arg value="${fork.git.sha}"/>
+                                </exec>
+                                <mkdir dir="${project.build.directory}/fork-source-tree"/>
+                                <unzip src="${project.build.directory}/fork-source-tree.zip"
+                                       dest="${project.build.directory}/fork-source-tree"/>
                                 <mkdir dir="${project.build.outputDirectory}/META-INF"/>
                                 <echo file="${project.build.outputDirectory}/META-INF/surprising-exchange-core.properties"
                                       encoding="UTF-8"
                                       message="fork.git.sha=${fork.git.sha}&#10;fork.git.dirty=false&#10;"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>verify-packaged-fork-provenance</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <available file="${project.build.directory}/${project.build.finalName}.jar"
+                                           property="fork.jar.exists"/>
+                                <fail unless="fork.jar.exists"
+                                      message="exchange-core JAR must exist before provenance verification"/>
+                                <loadfile property="fork.git.sha.before"
+                                          srcFile="${project.build.directory}/fork-git-sha.txt"/>
+                                <exec executable="git" dir="${project.basedir}" failonerror="true"
+                                      failifexecutionfails="true" outputproperty="fork.git.sha.after">
+                                    <arg value="rev-parse"/>
+                                    <arg value="HEAD"/>
+                                </exec>
+                                <exec executable="git" dir="${project.basedir}" failonerror="true"
+                                      failifexecutionfails="true"
+                                      output="${project.build.directory}/fork-git-status-after-package.txt">
+                                    <arg value="status"/>
+                                    <arg value="--porcelain"/>
+                                    <arg value="--untracked-files=normal"/>
+                                </exec>
+                                <length file="${project.build.directory}/fork-git-status-after-package.txt"
+                                        property="fork.git.status.after.length"/>
+                                <condition property="fork.git.still.clean">
+                                    <equals arg1="${fork.git.status.after.length}" arg2="0" trim="true"/>
+                                </condition>
+                                <fail unless="fork.git.still.clean"
+                                      message="exchange-core source changed while packaging"/>
+                                <condition property="fork.git.sha.unchanged">
+                                    <equals arg1="${fork.git.sha.before}" arg2="${fork.git.sha.after}" trim="true"/>
+                                </condition>
+                                <fail unless="fork.git.sha.unchanged"
+                                      message="exchange-core HEAD changed while packaging"/>
+                                <delete dir="${project.build.directory}/fork-provenance-verify" quiet="true"/>
+                                <mkdir dir="${project.build.directory}/fork-provenance-verify"/>
+                                <unzip src="${project.build.directory}/${project.build.finalName}.jar"
+                                       dest="${project.build.directory}/fork-provenance-verify">
+                                    <patternset>
+                                        <include name="META-INF/surprising-exchange-core.properties"/>
+                                    </patternset>
+                                </unzip>
+                                <loadfile property="fork.jar.provenance"
+                                          srcFile="${project.build.directory}/fork-provenance-verify/META-INF/surprising-exchange-core.properties"/>
+                                <condition property="fork.jar.sha.matches">
+                                    <contains string="${fork.jar.provenance}"
+                                              substring="fork.git.sha=${fork.git.sha.after}"/>
+                                </condition>
+                                <fail unless="fork.jar.sha.matches"
+                                      message="packaged exchange-core provenance SHA does not match source"/>
+                                <condition property="fork.jar.clean.matches">
+                                    <contains string="${fork.jar.provenance}"
+                                              substring="fork.git.dirty=false"/>
+                                </condition>
+                                <fail unless="fork.jar.clean.matches"
+                                      message="packaged exchange-core provenance does not attest a clean source"/>
                             </target>
                         </configuration>
                     </execution>
@@ -445,7 +534,7 @@
                             </dependency>
                         </dependencies>
                         <configuration>
-                            <sourceDirectory>${project.basedir}/src/main/java</sourceDirectory>
+                            <sourceDirectory>${project.build.directory}/fork-source-tree/src/main/java</sourceDirectory>
                             <outputDirectory>${delombok.output}</outputDirectory>
                             <addOutputDirectory>false</addOutputDirectory>
                             <encoding>${project.build.sourceEncoding}</encoding>
