@@ -9,6 +9,20 @@ This file starts tracking from the journalling/recovery work below rather than
 reconstructing the fork's full prior history; earlier changes remain available
 via `git log`.
 
+## [0.5.9-emporia]
+
+### Added
+
+- Added a snapshot-only in-memory serialization processor. Callers can export
+  exchange-core's native matching/risk module blobs into an external consensus
+  snapshot and import them before starting with `fromSnapshotOnly`, without a
+  second order book or an O(open orders) replay rebuild.
+
+### Verified
+
+- `InMemorySerializationProcessorTest`: native snapshot export/import restores
+  the same state hash, balances, order-book volumes, and FIFO priority.
+
 ## [0.5.8-emporia]
 
 ### Fixed
