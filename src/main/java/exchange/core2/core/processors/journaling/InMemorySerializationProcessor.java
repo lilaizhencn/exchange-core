@@ -15,11 +15,13 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
+import java.util.zip.CRC32C;
 
 /**
  * Snapshot-only serialization processor backed by caller-owned memory.
@@ -34,8 +36,8 @@ public final class InMemorySerializationProcessor implements ISerializationProce
             Comparator.comparing(SerializedModule::type)
                     .thenComparingInt(SerializedModule::instanceId);
 
-    private final ConcurrentMap<SnapshotKey, SerializedModule> modules =
-            new ConcurrentHashMap<>();
+    private final Map<SnapshotKey, SerializedModule> modules = new HashMap<>();
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Override
     public boolean storeData(
@@ -56,9 +58,13 @@ public final class InMemorySerializationProcessor implements ISerializationProce
                 instanceId,
                 serialize(obj));
         final SnapshotKey key = new SnapshotKey(snapshotId, type, instanceId);
-        final SerializedModule existing = modules.putIfAbsent(key, module);
-        if (existing != null && !existing.equals(module)) {
-            throw new IllegalStateException("Conflicting snapshot module " + key);
+        lock.writeLock().lock();
+        try {
+            if (modules.putIfAbsent(key, module) != null) {
+                throw new IllegalStateException("Duplicate snapshot module " + key);
+            }
+        } finally {
+            lock.writeLock().unlock();
         }
         return true;
     }
@@ -73,10 +79,18 @@ public final class InMemorySerializationProcessor implements ISerializationProce
         Objects.requireNonNull(initFunc, "initFunc");
 
         final SnapshotKey key = new SnapshotKey(snapshotId, type, instanceId);
-        final SerializedModule module = modules.get(key);
+        final SerializedModule module;
+        lock.readLock().lock();
+        try {
+            final SerializedModule stored = modules.get(key);
+            module = stored == null ? null : stored.copy();
+        } finally {
+            lock.readLock().unlock();
+        }
         if (module == null) {
             throw new IllegalStateException("Snapshot module not found " + key);
         }
+        module.verifyChecksum();
 
         final Bytes<ByteBuffer> bytes = Bytes.wrapForRead(ByteBuffer.wrap(module.data()));
         try {
@@ -97,11 +111,16 @@ public final class InMemorySerializationProcessor implements ISerializationProce
             throw new IllegalArgumentException("snapshotId must be positive");
         }
         final List<SerializedModule> exported = new ArrayList<>();
-        modules.forEach((key, module) -> {
-            if (key.snapshotId == snapshotId) {
-                exported.add(module.copy());
-            }
-        });
+        lock.readLock().lock();
+        try {
+            modules.forEach((key, module) -> {
+                if (key.snapshotId == snapshotId) {
+                    exported.add(module.copy());
+                }
+            });
+        } finally {
+            lock.readLock().unlock();
+        }
         if (exported.isEmpty()) {
             throw new IllegalStateException("Snapshot " + snapshotId + " not found");
         }
@@ -114,17 +133,41 @@ public final class InMemorySerializationProcessor implements ISerializationProce
         if (importedModules.isEmpty()) {
             throw new IllegalArgumentException("Snapshot modules must not be empty");
         }
+        final Map<SnapshotKey, SerializedModule> validated = new HashMap<>();
         for (final SerializedModule imported : importedModules) {
             Objects.requireNonNull(imported, "snapshot module");
             validateCoordinates(
                     imported.snapshotId(), imported.type(), imported.instanceId());
             final SerializedModule module = imported.copy();
+            module.verifyChecksum();
             final SnapshotKey key = new SnapshotKey(
                     module.snapshotId(), module.type(), module.instanceId());
-            final SerializedModule existing = modules.putIfAbsent(key, module);
-            if (existing != null && !existing.equals(module)) {
-                throw new IllegalStateException("Conflicting snapshot module " + key);
+            if (validated.putIfAbsent(key, module) != null) {
+                throw new IllegalArgumentException("Duplicate imported snapshot module " + key);
             }
+        }
+        lock.writeLock().lock();
+        try {
+            for (final SnapshotKey key : validated.keySet()) {
+                if (modules.containsKey(key)) {
+                    throw new IllegalStateException("Snapshot module already exists " + key);
+                }
+            }
+            modules.putAll(validated);
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    public void removeSnapshot(final long snapshotId) {
+        if (snapshotId <= 0) {
+            throw new IllegalArgumentException("snapshotId must be positive");
+        }
+        lock.writeLock().lock();
+        try {
+            modules.keySet().removeIf(key -> key.snapshotId == snapshotId);
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 
@@ -175,7 +218,12 @@ public final class InMemorySerializationProcessor implements ISerializationProce
             final long snapshotId,
             final SerializedModuleType type,
             final int instanceId) {
-        return modules.containsKey(new SnapshotKey(snapshotId, type, instanceId));
+        lock.readLock().lock();
+        try {
+            return modules.containsKey(new SnapshotKey(snapshotId, type, instanceId));
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     private static byte[] serialize(final WriteBytesMarshallable obj) {
@@ -218,6 +266,7 @@ public final class InMemorySerializationProcessor implements ISerializationProce
         private final SerializedModuleType type;
         private final int instanceId;
         private final byte[] data;
+        private final long checksum;
 
         public SerializedModule(
                 final long snapshotId,
@@ -233,6 +282,7 @@ public final class InMemorySerializationProcessor implements ISerializationProce
             this.type = type;
             this.instanceId = instanceId;
             this.data = Objects.requireNonNull(data, "data").clone();
+            this.checksum = checksum(this.data);
         }
 
         public long snapshotId() {
@@ -257,6 +307,16 @@ public final class InMemorySerializationProcessor implements ISerializationProce
 
         public byte[] data() {
             return data.clone();
+        }
+
+        public long checksum() {
+            return checksum;
+        }
+
+        private void verifyChecksum() {
+            if (checksum != checksum(data)) {
+                throw new IllegalStateException("Snapshot module checksum mismatch");
+            }
         }
 
         private SerializedModule copy() {
@@ -285,6 +345,12 @@ public final class InMemorySerializationProcessor implements ISerializationProce
             int result = Objects.hash(snapshotId, sequence, timestampNs, type, instanceId);
             result = 31 * result + Arrays.hashCode(data);
             return result;
+        }
+
+        private static long checksum(final byte[] data) {
+            final CRC32C checksum = new CRC32C();
+            checksum.update(data, 0, data.length);
+            return checksum.getValue();
         }
     }
 }

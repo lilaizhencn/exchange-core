@@ -54,6 +54,7 @@ public final class ReportsQueriesConfiguration {
         addQueryClass(reportConstructors, ReportType.STATE_HASH.getCode(), StateHashReportQuery.class);
         addQueryClass(reportConstructors, ReportType.SINGLE_USER_REPORT.getCode(), SingleUserReportQuery.class);
         addQueryClass(reportConstructors, ReportType.TOTAL_CURRENCY_BALANCE.getCode(), TotalCurrencyBalanceReportQuery.class);
+        addQueryClass(reportConstructors, ReportType.OPEN_ORDERS.getCode(), OpenOrdersReportQuery.class);
 
         customReports.forEach((code, customReport) -> addQueryClass(reportConstructors, code, customReport));
 

@@ -9,6 +9,15 @@ This file starts tracking from the journalling/recovery work below rather than
 reconstructing the fork's full prior history; earlier changes remain available
 via `git log`.
 
+## [0.5.10-emporia]
+
+### Added
+
+- Added a single-pass open-order report for exact, O(open orders) reconciliation
+  after native snapshot restore.
+- Added atomic snapshot import, CRC32C metadata, deterministic concurrent export,
+  and explicit in-memory snapshot removal.
+
 ## [0.5.9-emporia]
 
 ### Added
