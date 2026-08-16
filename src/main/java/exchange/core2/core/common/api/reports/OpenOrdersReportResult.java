@@ -5,7 +5,6 @@ import net.openhft.chronicle.bytes.BytesIn;
 import net.openhft.chronicle.bytes.BytesOut;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -14,21 +13,18 @@ import java.util.stream.Stream;
 public final class OpenOrdersReportResult implements ReportResult {
 
     private static final int MAX_ORDERS = 100_000_000;
-    private static final Comparator<OpenOrder> CANONICAL_ORDER =
-            Comparator.comparingLong(OpenOrder::orderId).thenComparingInt(OpenOrder::symbolId);
 
     private final List<OpenOrder> orders;
 
     public OpenOrdersReportResult(final List<OpenOrder> orders) {
-        final ArrayList<OpenOrder> sorted = new ArrayList<>(orders);
-        sorted.sort(CANONICAL_ORDER);
-        final Set<Long> orderIds = new HashSet<>(sorted.size());
-        for (final OpenOrder order : sorted) {
+        final ArrayList<OpenOrder> copied = new ArrayList<>(orders);
+        final Set<Long> orderIds = new HashSet<>(copied.size());
+        for (final OpenOrder order : copied) {
             if (!orderIds.add(order.orderId())) {
                 throw new IllegalStateException("Duplicate open order " + order.orderId());
             }
         }
-        this.orders = List.copyOf(sorted);
+        this.orders = List.copyOf(copied);
     }
 
     public List<OpenOrder> getOrders() {
