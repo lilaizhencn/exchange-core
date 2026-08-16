@@ -4,7 +4,7 @@
 
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core</artifactId>
-    <version>0.5.11-emporia</version>
+    <version>0.5.12-emporia</version>
     <packaging>jar</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
@@ -45,6 +45,7 @@
 
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <project.build.outputTimestamp>2026-08-16T00:00:00Z</project.build.outputTimestamp>
         <java.version>25</java.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <maven.compiler.proc>full</maven.compiler.proc>
