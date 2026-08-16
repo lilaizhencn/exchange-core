@@ -85,7 +85,7 @@ ordering, runtime metrics and JMH benchmarks.
 <dependency>
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core</artifactId>
-    <version>0.5.13-emporia</version>
+    <version>0.5.14-emporia</version>
 </dependency>
 ```
 

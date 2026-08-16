@@ -9,6 +9,18 @@ This file starts tracking from the journalling/recovery work below rather than
 reconstructing the fork's full prior history; earlier changes remain available
 via `git log`.
 
+## [0.5.14-emporia]
+
+### Added
+
+- Open-order reports preserve their native traversal order and reject duplicate IDs in one linear pass.
+- Reproducible builds reject dirty Git worktrees and embed the exact clean source commit for downstream verification.
+
+### Verified
+
+- Two clean JDK 25 builds produce the same whole-JAR SHA-256.
+- The full fork suite covers native snapshot restore, FIFO priority, linear report order and duplicate rejection.
+
 ## [0.5.10-emporia]
 
 ### Added
