@@ -4,7 +4,7 @@
 
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core</artifactId>
-    <version>0.5.12-emporia</version>
+    <version>0.5.13-emporia</version>
     <packaging>jar</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
@@ -339,6 +339,48 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>stamp-clean-fork-provenance</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.directory}"/>
+                                <exec executable="git" dir="${project.basedir}" failonerror="true"
+                                      failifexecutionfails="true" outputproperty="fork.git.sha">
+                                    <arg value="rev-parse"/>
+                                    <arg value="HEAD"/>
+                                </exec>
+                                <exec executable="git" dir="${project.basedir}" failonerror="true"
+                                      failifexecutionfails="true"
+                                      output="${project.build.directory}/fork-git-status.txt">
+                                    <arg value="status"/>
+                                    <arg value="--porcelain"/>
+                                    <arg value="--untracked-files=normal"/>
+                                </exec>
+                                <length file="${project.build.directory}/fork-git-status.txt"
+                                        property="fork.git.status.length"/>
+                                <condition property="fork.git.clean">
+                                    <equals arg1="${fork.git.status.length}" arg2="0" trim="true"/>
+                                </condition>
+                                <fail unless="fork.git.clean"
+                                      message="exchange-core artifact must be built from a clean Git worktree"/>
+                                <mkdir dir="${project.build.outputDirectory}/META-INF"/>
+                                <echo file="${project.build.outputDirectory}/META-INF/surprising-exchange-core.properties"
+                                      encoding="UTF-8"
+                                      message="fork.git.sha=${fork.git.sha}&#10;fork.git.dirty=false&#10;"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

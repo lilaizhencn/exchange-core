@@ -85,9 +85,13 @@ ordering, runtime metrics and JMH benchmarks.
 <dependency>
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core</artifactId>
-    <version>0.5.3</version>
+    <version>0.5.13-emporia</version>
 </dependency>
 ```
+
+Emporia releases must be built from a clean Git worktree. Maven records the exact source commit in
+`META-INF/surprising-exchange-core.properties`; the consuming Surprising EX build verifies that provenance and the
+whole-JAR SHA-256 before compiling the Aeron service.
 
 Alternatively, you can clone this repository and run the [example test](https://github.com/mzheravin/exchange-core/tree/master/src/test/java/exchange/core2/tests/examples/ITCoreExample.java).
 
