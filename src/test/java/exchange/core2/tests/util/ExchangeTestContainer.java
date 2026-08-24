@@ -20,7 +20,6 @@ import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.ExchangeCore;
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.L2MarketData;
-import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.SymbolType;
 import exchange.core2.core.common.api.*;
 import exchange.core2.core.common.api.binary.BatchAddSymbolsCommand;
@@ -70,8 +69,7 @@ public final class ExchangeTestContainer implements AutoCloseable {
     private ObjLongConsumer<OrderCommand> consumer = (cmd, seq) -> {
     };
 
-    public static final Consumer<MatcherResult> CHECK_SUCCESS = result ->
-            assertEquals(CommandResultCode.SUCCESS, result.resultCode());
+    public static final Consumer<OrderCommand> CHECK_SUCCESS = cmd -> assertEquals(CommandResultCode.SUCCESS, cmd.resultCode);
 
     public static String timeBasedExchangeId() {
         return String.format("%012X", System.currentTimeMillis());
@@ -302,7 +300,7 @@ public final class ExchangeTestContainer implements AutoCloseable {
         assertThat(api.submitCommandAsync(apiCommand).join(), Is.is(expectedResultCode));
     }
 
-    public void submitCommandSync(ApiCommand apiCommand, Consumer<MatcherResult> validator) {
+    public void submitCommandSync(ApiCommand apiCommand, Consumer<OrderCommand> validator) {
         validator.accept(api.submitCommandAsyncFullResponse(apiCommand).join());
     }
 

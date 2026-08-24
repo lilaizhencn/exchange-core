@@ -179,7 +179,7 @@ public final class ExchangeApi {
         }
     }
 
-    public CompletableFuture<MatcherResult> submitCommandAsyncFullResponse(ApiCommand cmd) {
+    public CompletableFuture<OrderCommand> submitCommandAsyncFullResponse(ApiCommand cmd) {
 
         if (cmd instanceof ApiMoveOrder) {
             return submitCommandAsyncFullResponse(MOVE_ORDER_TRANSLATOR, (ApiMoveOrder) cmd);
@@ -208,6 +208,23 @@ public final class ExchangeApi {
             return submitCommandAsyncFullResponse(NOP_TRANSLATOR, (ApiNop) cmd);
         } else {
             throw new IllegalArgumentException("Unsupported command type: " + cmd.getClass().getSimpleName());
+        }
+    }
+
+    public CompletableFuture<MatcherResult> submitCommandAsyncMatcherResult(ApiCommand cmd) {
+        if (cmd instanceof ApiMoveOrder) {
+            return submitCommandAsyncMatcherResult(MOVE_ORDER_TRANSLATOR, (ApiMoveOrder) cmd);
+        } else if (cmd instanceof ApiReplaceOrder) {
+            requireMatchingOnly();
+            return submitCommandAsyncMatcherResult(REPLACE_ORDER_TRANSLATOR, (ApiReplaceOrder) cmd);
+        } else if (cmd instanceof ApiPlaceOrder) {
+            return submitCommandAsyncMatcherResult(NEW_ORDER_TRANSLATOR, (ApiPlaceOrder) cmd);
+        } else if (cmd instanceof ApiCancelOrder) {
+            return submitCommandAsyncMatcherResult(CANCEL_ORDER_TRANSLATOR, (ApiCancelOrder) cmd);
+        } else if (cmd instanceof ApiReduceOrder) {
+            return submitCommandAsyncMatcherResult(REDUCE_ORDER_TRANSLATOR, (ApiReduceOrder) cmd);
+        } else {
+            throw new IllegalArgumentException("Unsupported matcher command type: " + cmd.getClass().getSimpleName());
         }
     }
 
@@ -362,7 +379,11 @@ public final class ExchangeApi {
         return submitCommandAsync(translator, apiCommand, c -> c.resultCode);
     }
 
-    private <T extends ApiCommand> CompletableFuture<MatcherResult> submitCommandAsyncFullResponse(EventTranslatorOneArg<OrderCommand, T> translator, final T apiCommand) {
+    private <T extends ApiCommand> CompletableFuture<OrderCommand> submitCommandAsyncFullResponse(EventTranslatorOneArg<OrderCommand, T> translator, final T apiCommand) {
+        return submitCommandAsync(translator, apiCommand, Function.identity());
+    }
+
+    private <T extends ApiCommand> CompletableFuture<MatcherResult> submitCommandAsyncMatcherResult(EventTranslatorOneArg<OrderCommand, T> translator, final T apiCommand) {
         final CompletableFuture<MatcherResult> future = new CompletableFuture<>();
 
         ringBuffer.publishEvent(
