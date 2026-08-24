@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import exchange.core2.core.common.CoreSymbolSpecification;
 import exchange.core2.core.common.MatcherEventType;
-import exchange.core2.core.common.MatcherTradeEvent;
+import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.Order;
 import exchange.core2.core.common.OrderAction;
 import exchange.core2.core.common.OrderType;
@@ -44,7 +44,7 @@ public class OrderStepdefs implements En {
 
     private ExchangeTestContainer container = null;
 
-    private List<MatcherTradeEvent> matcherEvents;
+    private List<MatcherResult.MatcherEvent> matcherEvents;
     private Map<Long, ApiPlaceOrder> orders = new HashMap<>();
 
     final Map<String, CoreSymbolSpecification> symbolSpecificationMap = new HashMap<>();
@@ -259,17 +259,17 @@ public class OrderStepdefs implements En {
 
                 container.getApi().submitCommandAsyncFullResponse(order).thenAccept(
                     cmd -> {
-                        assertThat(cmd.resultCode, is(CommandResultCode.SUCCESS));
-                        assertThat(cmd.command, is(OrderCommandType.CANCEL_ORDER));
-                        assertThat(cmd.orderId, is(orderId));
-                        assertThat(cmd.uid, is(clientId));
-                        assertThat(cmd.symbol, is(initialOrder.symbol));
-                        assertThat(cmd.action, is(initialOrder.action));
+                        assertThat(cmd.resultCode(), is(CommandResultCode.SUCCESS));
+                        assertThat(cmd.command(), is(OrderCommandType.CANCEL_ORDER));
+                        assertThat(cmd.orderId(), is(orderId));
+                        assertThat(cmd.uid(), is(clientId));
+                        assertThat(cmd.symbol(), is(initialOrder.symbol));
+                        assertThat(cmd.action(), is(initialOrder.action));
 
-                        final MatcherTradeEvent evt = cmd.matcherEvent;
+                        final MatcherResult.MatcherEvent evt = cmd.events().getFirst();
                         assertNotNull(evt);
-                        assertThat(evt.eventType, is(MatcherEventType.REDUCE));
-                        assertThat(evt.size, is(size));
+                        assertThat(evt.eventType(), is(MatcherEventType.REDUCE));
+                        assertThat(evt.size(), is(size));
                     }).join();
             });
     }
@@ -292,31 +292,31 @@ public class OrderStepdefs implements En {
 
         log.debug("PLACE : {}", order);
         container.getApi().submitCommandAsyncFullResponse(order).thenAccept(cmd -> {
-            assertThat(cmd.orderId, is(orderId));
-            assertThat(cmd.resultCode, is(resultCode));
-            assertThat(cmd.uid, is(clientId));
-            assertThat(cmd.price, is(price));
-            assertThat(cmd.size, is(size));
-            assertThat(cmd.action, is(OrderAction.valueOf(side)));
-            assertThat(cmd.orderType, is(OrderType.valueOf(orderType)));
-            assertThat(cmd.symbol, is(symbol.symbolId));
+            assertThat(cmd.orderId(), is(orderId));
+            assertThat(cmd.resultCode(), is(resultCode));
+            assertThat(cmd.uid(), is(clientId));
+            assertThat(cmd.price(), is(price));
+            assertThat(cmd.size(), is(size));
+            assertThat(cmd.action(), is(OrderAction.valueOf(side)));
+            assertThat(cmd.orderType(), is(OrderType.valueOf(orderType)));
+            assertThat(cmd.symbol(), is(symbol.symbolId));
 
-            OrderStepdefs.this.matcherEvents = cmd.extractEvents();
+            OrderStepdefs.this.matcherEvents = cmd.events();
         }).join();
     }
 
     private void theOrderIsMatched(long orderId, long lastPx, long lastQty, boolean completed, Long bidderHoldPrice) {
         assertThat(matcherEvents.size(), is(1));
 
-        MatcherTradeEvent evt = matcherEvents.get(0);
-        assertThat(evt.matchedOrderId, is(orderId));
-        assertThat(evt.matchedOrderUid, is(orders.get(orderId).uid));
-        assertThat(evt.matchedOrderCompleted, is(completed));
-        assertThat(evt.eventType, is(MatcherEventType.TRADE));
-        assertThat(evt.size, is(lastQty));
-        assertThat(evt.price, is(lastPx));
+        MatcherResult.MatcherEvent evt = matcherEvents.get(0);
+        assertThat(evt.matchedOrderId(), is(orderId));
+        assertThat(evt.matchedOrderUid(), is(orders.get(orderId).uid));
+        assertThat(evt.matchedOrderCompleted(), is(completed));
+        assertThat(evt.eventType(), is(MatcherEventType.TRADE));
+        assertThat(evt.size(), is(lastQty));
+        assertThat(evt.price(), is(lastPx));
         if (bidderHoldPrice != null) {
-            assertThat(evt.bidderHoldPrice, is(bidderHoldPrice));
+            assertThat(evt.bidderHoldPrice(), is(bidderHoldPrice));
         }
     }
 
@@ -327,11 +327,11 @@ public class OrderStepdefs implements En {
             .newPrice(newPrice).build();
         log.debug("MOVE : {}", moveOrder);
         container.submitCommandSync(moveOrder, cmd -> {
-            assertThat(cmd.resultCode, is(resultCode2));
-            assertThat(cmd.orderId, is(orderId));
-            assertThat(cmd.uid, is(clientId));
+            assertThat(cmd.resultCode(), is(resultCode2));
+            assertThat(cmd.orderId(), is(orderId));
+            assertThat(cmd.uid(), is(clientId));
 
-            matcherEvents = cmd.extractEvents();
+            matcherEvents = cmd.events();
         });
     }
 

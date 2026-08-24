@@ -178,7 +178,7 @@ public final class ExchangeApi {
         }
     }
 
-    public CompletableFuture<OrderCommand> submitCommandAsyncFullResponse(ApiCommand cmd) {
+    public CompletableFuture<MatcherResult> submitCommandAsyncFullResponse(ApiCommand cmd) {
 
         if (cmd instanceof ApiMoveOrder) {
             return submitCommandAsyncFullResponse(MOVE_ORDER_TRANSLATOR, (ApiMoveOrder) cmd);
@@ -361,8 +361,17 @@ public final class ExchangeApi {
         return submitCommandAsync(translator, apiCommand, c -> c.resultCode);
     }
 
-    private <T extends ApiCommand> CompletableFuture<OrderCommand> submitCommandAsyncFullResponse(EventTranslatorOneArg<OrderCommand, T> translator, final T apiCommand) {
-        return submitCommandAsync(translator, apiCommand, Function.identity());
+    private <T extends ApiCommand> CompletableFuture<MatcherResult> submitCommandAsyncFullResponse(EventTranslatorOneArg<OrderCommand, T> translator, final T apiCommand) {
+        final CompletableFuture<MatcherResult> future = new CompletableFuture<>();
+
+        ringBuffer.publishEvent(
+                (cmd, seq, apiCmd) -> {
+                    translator.translateTo(cmd, seq, apiCmd);
+                    promises.put(seq, orderCommand -> future.complete(MatcherResult.from(seq, orderCommand)));
+                },
+                apiCommand);
+
+        return future;
     }
 
     private <T extends ApiCommand, R> CompletableFuture<R> submitCommandAsync(final EventTranslatorOneArg<OrderCommand, T> translator,

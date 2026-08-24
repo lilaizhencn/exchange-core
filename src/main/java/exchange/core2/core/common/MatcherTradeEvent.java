@@ -65,6 +65,19 @@ public final class MatcherTradeEvent {
     // reference to next event in chain
     public MatcherTradeEvent nextEvent;
 
+    public void reset() {
+        eventType = null;
+        section = 0;
+        activeOrderCompleted = false;
+        matchedOrderId = 0L;
+        matchedOrderUid = 0L;
+        matchedOrderCompleted = false;
+        price = 0L;
+        size = 0L;
+        bidderHoldPrice = 0L;
+        nextEvent = null;
+    }
+
 
     // testing only
     public MatcherTradeEvent copy() {

@@ -192,6 +192,7 @@ public final class OrderBookEventsHelper {
             }
             final MatcherTradeEvent res = eventsChainHead;
             eventsChainHead = eventsChainHead.nextEvent;
+            res.reset();
             return res;
         } else {
             return new MatcherTradeEvent();
