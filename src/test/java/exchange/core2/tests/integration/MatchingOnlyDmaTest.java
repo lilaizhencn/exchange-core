@@ -2,6 +2,7 @@ package exchange.core2.tests.integration;
 
 import exchange.core2.core.ExchangeApi;
 import exchange.core2.core.common.CoreSymbolSpecification;
+import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.OrderAction;
 import exchange.core2.core.common.SymbolType;
 import exchange.core2.core.common.api.dma.DmaCancelOrder;
@@ -17,6 +18,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -44,6 +48,38 @@ class MatchingOnlyDmaTest {
                     .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.MATCHING_ONLY)
                     .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
                     .build();
+
+    @Test
+    @Timeout(15)
+    void shouldUseDirectPipelineAndCorrelationWithoutPromiseRegistration() throws Exception {
+        final PerformanceConfiguration direct = PerformanceConfiguration.baseBuilder()
+                .directMatchingOnlyPipeline(true)
+                .matchingEnginesNum(1)
+                .riskEnginesNum(1)
+                .build();
+        try (ExchangeTestContainer container = ExchangeTestContainer.create(direct, MATCHING_ONLY)) {
+            container.addSymbol(AAPL);
+            AtomicReference<MatcherResult> result = new AtomicReference<>();
+            AtomicReference<Long> correlation = new AtomicReference<>();
+            CountDownLatch completed = new CountDownLatch(1);
+            container.setConsumer((command, sequence) -> {
+                if (command.correlationId != 0) {
+                    correlation.set(command.correlationId);
+                    result.set(MatcherResult.from(sequence, command));
+                    completed.countDown();
+                }
+            });
+
+            container.getApi().submitMatcherPlace(91, System.nanoTime(), 1_001, 0,
+                    100, 100, 3, OrderAction.ASK,
+                    exchange.core2.core.common.OrderType.GTC, AAPL_USD, 11);
+
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+            assertEquals(91L, correlation.get());
+            assertEquals(CommandResultCode.SUCCESS, result.get().resultCode());
+            assertEquals(1_001L, result.get().orderId());
+        }
+    }
 
     @Test
     @Timeout(15)

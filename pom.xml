@@ -4,7 +4,7 @@
 
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core</artifactId>
-    <version>0.5.16-emporia</version>
+    <version>0.5.17-emporia</version>
     <packaging>jar</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>

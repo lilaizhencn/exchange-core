@@ -72,6 +72,7 @@ public final class MatchingEngineRouter implements WriteBytesMarshallable {
     private final Path folder;
 
     private final boolean cfgMarginTradingEnabled;
+    private final boolean cfgMatchingOnly;
 
     private final boolean cfgSendL2ForEveryCmd;
     private final int cfgL2RefreshDepth;
@@ -161,6 +162,7 @@ public final class MatchingEngineRouter implements WriteBytesMarshallable {
 
         final OrdersProcessingConfiguration ordersProcCfg = exchangeCfg.getOrdersProcessingCfg();
         this.cfgMarginTradingEnabled = ordersProcCfg.getMarginTradingMode() == OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_ENABLED;
+        this.cfgMatchingOnly = ordersProcCfg.getRiskProcessingMode().isMatchingOnly();
 
         final PerformanceConfiguration perfCfg = exchangeCfg.getPerformanceCfg();
         this.cfgSendL2ForEveryCmd = perfCfg.isSendL2ForEveryCmd();
@@ -179,6 +181,12 @@ public final class MatchingEngineRouter implements WriteBytesMarshallable {
                 || command == OrderCommandType.ORDER_BOOK_REQUEST) {
             // process specific symbol group only
             if (symbolForThisHandler(cmd.symbol)) {
+                if (cfgMatchingOnly
+                        && cmd.resultCode == CommandResultCode.NEW
+                        && (command == OrderCommandType.PLACE_ORDER
+                        || command == OrderCommandType.REPLACE_ORDER)) {
+                    cmd.resultCode = CommandResultCode.VALID_FOR_MATCHING_ENGINE;
+                }
                 processMatchingCommand(cmd);
             }
         } else if (command == OrderCommandType.BINARY_DATA_QUERY || command == OrderCommandType.BINARY_DATA_COMMAND) {
@@ -201,6 +209,12 @@ public final class MatchingEngineRouter implements WriteBytesMarshallable {
                 cmd.resultCode = CommandResultCode.SUCCESS;
             }
 
+        } else if (cfgMatchingOnly && (command == OrderCommandType.ADD_USER
+                || command == OrderCommandType.PERSIST_STATE_RISK)) {
+            if (shardId == 0) {
+                cmd.resultCode = CommandResultCode.SUCCESS;
+            }
+
         } else if (command == OrderCommandType.PERSIST_STATE_MATCHING) {
             final boolean isSuccess = serializationProcessor.storeData(
                     cmd.orderId,
@@ -209,8 +223,11 @@ public final class MatchingEngineRouter implements WriteBytesMarshallable {
                     ISerializationProcessor.SerializedModuleType.MATCHING_ENGINE_ROUTER,
                     shardId,
                     this);
-            // Send ACCEPTED because this is a first command in series. Risk engine is second - so it will return SUCCESS
-            UnsafeUtils.setResultVolatile(cmd, isSuccess, CommandResultCode.ACCEPTED, CommandResultCode.STATE_PERSIST_MATCHING_ENGINE_FAILED);
+            // Matching-only snapshots contain no risk module, so this command
+            // is the terminal persistence result rather than the first half.
+            UnsafeUtils.setResultVolatile(cmd, isSuccess,
+                    cfgMatchingOnly ? CommandResultCode.SUCCESS : CommandResultCode.ACCEPTED,
+                    CommandResultCode.STATE_PERSIST_MATCHING_ENGINE_FAILED);
         }
 
     }

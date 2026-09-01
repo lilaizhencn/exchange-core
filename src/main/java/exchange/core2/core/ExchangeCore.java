@@ -89,11 +89,18 @@ public final class ExchangeCore {
 
         final CoreWaitStrategy coreWaitStrategy = perfCfg.getWaitStrategy();
 
+        final boolean directMatchingOnlyPipeline = perfCfg.isDirectMatchingOnlyPipeline();
+        if (directMatchingOnlyPipeline
+                && !exchangeConfiguration.getOrdersProcessingCfg().getRiskProcessingMode().isMatchingOnly()) {
+            throw new IllegalArgumentException(
+                    "directMatchingOnlyPipeline requires RiskProcessingMode.MATCHING_ONLY");
+        }
+
         this.disruptor = new Disruptor<>(
                 OrderCommand::new,
                 ringBufferSize,
                 threadFactory,
-                ProducerType.MULTI, // multiple gateway threads are writing
+                perfCfg.isSingleProducer() ? ProducerType.SINGLE : ProducerType.MULTI,
                 coreWaitStrategy.getDisruptorWaitStrategyFactory().get());
 
         this.ringBuffer = disruptor.getRingBuffer();
@@ -101,7 +108,8 @@ public final class ExchangeCore {
         this.api = new ExchangeApi(
                 ringBuffer,
                 perfCfg.getBinaryCommandsLz4CompressorFactory().get(),
-                exchangeConfiguration.getOrdersProcessingCfg().getRiskProcessingMode());
+                exchangeConfiguration.getOrdersProcessingCfg().getRiskProcessingMode(),
+                directMatchingOnlyPipeline);
 
         final IOrderBook.OrderBookFactory orderBookFactory = perfCfg.getOrderBookFactory();
 
@@ -114,7 +122,8 @@ public final class ExchangeCore {
         serializationProcessor = serializationCfg.getSerializationProcessorFactory().apply(exchangeConfiguration);
 
         // creating shared objects pool
-        final int poolInitialSize = (matchingEnginesNum + riskEnginesNum) * 8;
+        final int activeRiskEngines = directMatchingOnlyPipeline ? 0 : riskEnginesNum;
+        final int poolInitialSize = (matchingEnginesNum + activeRiskEngines) * 8;
         final int chainLength = EVENTS_POOLING ? 1024 : 1;
         final SharedPool sharedPool = new SharedPool(poolInitialSize * 4, poolInitialSize, chainLength);
 
@@ -129,7 +138,8 @@ public final class ExchangeCore {
         disruptor.setDefaultExceptionHandler(exceptionHandler);
 
         // advice completable future to use the same CPU socket as disruptor
-        final ExecutorService loaderExecutor = Executors.newFixedThreadPool(matchingEnginesNum + riskEnginesNum, threadFactory);
+        final ExecutorService loaderExecutor = Executors.newFixedThreadPool(
+                matchingEnginesNum + activeRiskEngines, threadFactory);
 
         // start creating matching engines
         final Map<Integer, CompletableFuture<MatchingEngineRouter>> matchingEngineFutures = IntStream.range(0, matchingEnginesNum)
@@ -143,7 +153,7 @@ public final class ExchangeCore {
         // TODO create processors in same thread we will execute it??
 
         // start creating risk engines
-        final Map<Integer, CompletableFuture<RiskEngine>> riskEngineFutures = IntStream.range(0, riskEnginesNum)
+        final Map<Integer, CompletableFuture<RiskEngine>> riskEngineFutures = IntStream.range(0, activeRiskEngines)
                 .boxed()
                 .collect(Collectors.toMap(
                         shardId -> shardId,
@@ -162,8 +172,8 @@ public final class ExchangeCore {
                         entry -> entry.getValue().join()));
 
 
-        final List<TwoStepMasterProcessor> procR1 = new ArrayList<>(riskEnginesNum);
-        final List<TwoStepSlaveProcessor> procR2 = new ArrayList<>(riskEnginesNum);
+        final List<TwoStepMasterProcessor> procR1 = new ArrayList<>(activeRiskEngines);
+        final List<TwoStepSlaveProcessor> procR2 = new ArrayList<>(activeRiskEngines);
 
         // 1. grouping processor (G)
         final EventHandlerGroup<OrderCommand> afterGrouping =
@@ -178,24 +188,32 @@ public final class ExchangeCore {
             afterGrouping.handleEventsWith(jh);
         }
 
-        riskEngines.forEach((idx, riskEngine) -> afterGrouping.handleEventsWith(
-                (rb, bs) -> {
-                    final TwoStepMasterProcessor r1 = new TwoStepMasterProcessor(rb, rb.newBarrier(bs), riskEngine::preProcessCommand, exceptionHandler, coreWaitStrategy, "R1_" + idx);
-                    procR1.add(r1);
-                    return r1;
-                }));
+        final EventHandlerGroup<OrderCommand> matchingInput;
+        if (directMatchingOnlyPipeline) {
+            matchingInput = afterGrouping;
+        } else {
+            riskEngines.forEach((idx, riskEngine) -> afterGrouping.handleEventsWith(
+                    (rb, bs) -> {
+                        final TwoStepMasterProcessor r1 = new TwoStepMasterProcessor(rb, rb.newBarrier(bs), riskEngine::preProcessCommand, exceptionHandler, coreWaitStrategy, "R1_" + idx);
+                        procR1.add(r1);
+                        return r1;
+                    }));
+            matchingInput = disruptor.after(procR1.toArray(new TwoStepMasterProcessor[0]));
+        }
 
-        disruptor.after(procR1.toArray(new TwoStepMasterProcessor[0])).handleEventsWith(matchingEngineHandlers);
+        matchingInput.handleEventsWith(matchingEngineHandlers);
 
         // 3. risk release (R2) after matching engine (ME)
         final EventHandlerGroup<OrderCommand> afterMatchingEngine = disruptor.after(matchingEngineHandlers);
 
-        riskEngines.forEach((idx, riskEngine) -> afterMatchingEngine.handleEventsWith(
-                (rb, bs) -> {
-                    final TwoStepSlaveProcessor r2 = new TwoStepSlaveProcessor(rb, rb.newBarrier(bs), riskEngine::handlerRiskRelease, exceptionHandler, "R2_" + idx);
-                    procR2.add(r2);
-                    return r2;
-                }));
+        if (!directMatchingOnlyPipeline) {
+            riskEngines.forEach((idx, riskEngine) -> afterMatchingEngine.handleEventsWith(
+                    (rb, bs) -> {
+                        final TwoStepSlaveProcessor r2 = new TwoStepSlaveProcessor(rb, rb.newBarrier(bs), riskEngine::handlerRiskRelease, exceptionHandler, "R2_" + idx);
+                        procR2.add(r2);
+                        return r2;
+                    }));
+        }
 
 
         // 4. results handler (E) after matching engine (ME) + [journaling (J)]
@@ -206,12 +224,18 @@ public final class ExchangeCore {
         final ResultsHandler resultsHandler = new ResultsHandler(resultsConsumer);
 
         mainHandlerGroup.handleEventsWith((cmd, seq, eob) -> {
-            resultsHandler.onEvent(cmd, seq, eob);
-            api.processResult(seq, cmd); // TODO SLOW ?(volatile operations)
+            try {
+                resultsHandler.onEvent(cmd, seq, eob);
+                if (cmd.correlationId == 0) {
+                    api.processResult(seq, cmd);
+                }
+            } finally {
+                cmd.correlationId = 0;
+            }
         });
 
         // attach slave processors to master processor
-        IntStream.range(0, riskEnginesNum).forEach(i -> procR1.get(i).setSlaveProcessor(procR2.get(i)));
+        IntStream.range(0, activeRiskEngines).forEach(i -> procR1.get(i).setSlaveProcessor(procR2.get(i)));
 
         try {
             loaderExecutor.shutdown();

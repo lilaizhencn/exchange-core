@@ -63,6 +63,7 @@ public final class ExchangeApi {
     private final RingBuffer<OrderCommand> ringBuffer;
     private final LZ4Compressor lz4Compressor;
     private final OrdersProcessingConfiguration.RiskProcessingMode riskProcessingMode;
+    private final boolean directMatchingOnlyPipeline;
     private volatile DmaOrderLifecycleService dmaOrderLifecycleService;
 
     // promises cache (TODO can be changed to queue)
@@ -78,15 +79,28 @@ public final class ExchangeApi {
         this(
                 ringBuffer,
                 lz4Compressor,
-                OrdersProcessingConfiguration.RiskProcessingMode.FULL_PER_CURRENCY);
+                OrdersProcessingConfiguration.RiskProcessingMode.FULL_PER_CURRENCY,
+                false);
     }
 
     public ExchangeApi(final RingBuffer<OrderCommand> ringBuffer,
                        final LZ4Compressor lz4Compressor,
                        final OrdersProcessingConfiguration.RiskProcessingMode riskProcessingMode) {
+        this(ringBuffer, lz4Compressor, riskProcessingMode, false);
+    }
+
+    public ExchangeApi(final RingBuffer<OrderCommand> ringBuffer,
+                       final LZ4Compressor lz4Compressor,
+                       final OrdersProcessingConfiguration.RiskProcessingMode riskProcessingMode,
+                       final boolean directMatchingOnlyPipeline) {
         this.ringBuffer = Objects.requireNonNull(ringBuffer, "ringBuffer");
         this.lz4Compressor = Objects.requireNonNull(lz4Compressor, "lz4Compressor");
         this.riskProcessingMode = Objects.requireNonNull(riskProcessingMode, "riskProcessingMode");
+        if (directMatchingOnlyPipeline && !riskProcessingMode.isMatchingOnly()) {
+            throw new IllegalArgumentException(
+                    "directMatchingOnlyPipeline requires RiskProcessingMode.MATCHING_ONLY");
+        }
+        this.directMatchingOnlyPipeline = directMatchingOnlyPipeline;
         this.dmaOrderLifecycleService = supportsDmaLifecycle(riskProcessingMode)
                 ? new DmaOrderLifecycleService(this)
                 : null;
@@ -131,8 +145,13 @@ public final class ExchangeApi {
             publishBinaryData((ApiBinaryDataCommand) cmd, seq -> {
             });
         } else if (cmd instanceof ApiPersistState) {
-            publishPersistCmd((ApiPersistState) cmd, (seq1, seq2) -> {
-            });
+            if (directMatchingOnlyPipeline) {
+                publishMatchingPersistCmd((ApiPersistState) cmd, seq -> {
+                });
+            } else {
+                publishPersistCmd((ApiPersistState) cmd, (seq1, seq2) -> {
+                });
+            }
         } else if (cmd instanceof ApiReset) {
             ringBuffer.publishEvent(RESET_TRANSLATOR, (ApiReset) cmd);
         } else if (cmd instanceof ApiNop) {
@@ -413,6 +432,13 @@ public final class ExchangeApi {
 
     private CompletableFuture<CommandResultCode> submitPersistCommandAsync(final ApiPersistState apiCommand) {
 
+        if (directMatchingOnlyPipeline) {
+            final CompletableFuture<CommandResultCode> future = new CompletableFuture<>();
+            publishMatchingPersistCmd(apiCommand,
+                    seq -> promises.put(seq, cmd -> future.complete(cmd.resultCode)));
+            return future;
+        }
+
         final CompletableFuture<CommandResultCode> future1 = new CompletableFuture<>();
         final CompletableFuture<CommandResultCode> future2 = new CompletableFuture<>();
 
@@ -621,6 +647,25 @@ public final class ExchangeApi {
         } finally {
             seqConsumer.accept(firstSeq, secondSeq);
             ringBuffer.publish(firstSeq, secondSeq);
+        }
+    }
+
+    private void publishMatchingPersistCmd(final ApiPersistState api,
+                                           final LongConsumer seqConsumer) {
+        final long sequence = ringBuffer.next();
+        try {
+            final OrderCommand command = ringBuffer.get(sequence);
+            command.command = OrderCommandType.PERSIST_STATE_MATCHING;
+            command.orderId = api.dumpId;
+            command.symbol = -1;
+            command.uid = 0;
+            command.price = 0;
+            command.timestamp = api.timestamp;
+            command.resultCode = CommandResultCode.NEW;
+            command.correlationId = 0;
+            seqConsumer.accept(sequence);
+        } finally {
+            ringBuffer.publish(sequence);
         }
     }
 
@@ -960,6 +1005,134 @@ public final class ExchangeApi {
         return seq;
     }
 
+
+    /**
+     * Publishes a matcher command without allocating an API command, future,
+     * callback or promises-map entry. Completion is delivered to the
+     * ExchangeCore results consumer with the same correlation id.
+     */
+    public long submitMatcherPlace(long correlationId,
+                                   long timestampNs,
+                                   long orderId,
+                                   int userCookie,
+                                   long price,
+                                   long reservedBidPrice,
+                                   long size,
+                                   OrderAction action,
+                                   OrderType orderType,
+                                   int symbol,
+                                   long uid) {
+        requireDirectMatcherCorrelation(correlationId);
+        Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(orderType, "orderType");
+        final long sequence = ringBuffer.next();
+        try {
+            final OrderCommand cmd = ringBuffer.get(sequence);
+            cmd.command = OrderCommandType.PLACE_ORDER;
+            cmd.resultCode = CommandResultCode.NEW;
+            cmd.correlationId = correlationId;
+            cmd.timestamp = timestampNs;
+            cmd.orderId = orderId;
+            cmd.userCookie = userCookie;
+            cmd.price = price;
+            cmd.reserveBidPrice = reservedBidPrice;
+            cmd.size = size;
+            cmd.action = action;
+            cmd.orderType = orderType;
+            cmd.symbol = symbol;
+            cmd.uid = uid;
+        } finally {
+            ringBuffer.publish(sequence);
+        }
+        return sequence;
+    }
+
+    public long submitMatcherMove(long correlationId,
+                                  long timestampNs,
+                                  long price,
+                                  long orderId,
+                                  int symbol,
+                                  long uid) {
+        requireDirectMatcherCorrelation(correlationId);
+        final long sequence = ringBuffer.next();
+        try {
+            final OrderCommand cmd = ringBuffer.get(sequence);
+            cmd.command = OrderCommandType.MOVE_ORDER;
+            cmd.resultCode = CommandResultCode.NEW;
+            cmd.correlationId = correlationId;
+            cmd.timestamp = timestampNs;
+            cmd.price = price;
+            cmd.orderId = orderId;
+            cmd.symbol = symbol;
+            cmd.uid = uid;
+        } finally {
+            ringBuffer.publish(sequence);
+        }
+        return sequence;
+    }
+
+    public long submitMatcherReplace(long correlationId,
+                                     long timestampNs,
+                                     long price,
+                                     long reserveBidPrice,
+                                     long quantity,
+                                     OrderAction side,
+                                     long orderId,
+                                     int symbol,
+                                     long uid) {
+        requireDirectMatcherCorrelation(correlationId);
+        Objects.requireNonNull(side, "side");
+        final long sequence = ringBuffer.next();
+        try {
+            final OrderCommand cmd = ringBuffer.get(sequence);
+            cmd.command = OrderCommandType.REPLACE_ORDER;
+            cmd.resultCode = CommandResultCode.NEW;
+            cmd.correlationId = correlationId;
+            cmd.timestamp = timestampNs;
+            cmd.price = price;
+            cmd.reserveBidPrice = reserveBidPrice;
+            cmd.size = quantity;
+            cmd.action = side;
+            cmd.orderId = orderId;
+            cmd.symbol = symbol;
+            cmd.uid = uid;
+        } finally {
+            ringBuffer.publish(sequence);
+        }
+        return sequence;
+    }
+
+    public long submitMatcherCancel(long correlationId,
+                                    long timestampNs,
+                                    long orderId,
+                                    int symbol,
+                                    long uid) {
+        requireDirectMatcherCorrelation(correlationId);
+        final long sequence = ringBuffer.next();
+        try {
+            final OrderCommand cmd = ringBuffer.get(sequence);
+            cmd.command = OrderCommandType.CANCEL_ORDER;
+            cmd.resultCode = CommandResultCode.NEW;
+            cmd.correlationId = correlationId;
+            cmd.timestamp = timestampNs;
+            cmd.orderId = orderId;
+            cmd.symbol = symbol;
+            cmd.uid = uid;
+        } finally {
+            ringBuffer.publish(sequence);
+        }
+        return sequence;
+    }
+
+    private void requireDirectMatcherCorrelation(long correlationId) {
+        requireMatchingOnly();
+        if (!directMatchingOnlyPipeline) {
+            throw new IllegalStateException("direct matcher submission requires directMatchingOnlyPipeline");
+        }
+        if (correlationId <= 0) {
+            throw new IllegalArgumentException("matcher correlationId must be positive");
+        }
+    }
 
     public void placeNewOrder(int serviceFlags,
                               long eventsGroup,

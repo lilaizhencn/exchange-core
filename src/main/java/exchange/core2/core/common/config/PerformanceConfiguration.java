@@ -40,6 +40,19 @@ public final class PerformanceConfiguration {
      */
     private final int riskEnginesNum;
 
+    /**
+     * Use the Disruptor single-producer sequencer. Enable only when every
+     * publication, including continuations and administrative commands, is
+     * serialized by the caller.
+     */
+    private final boolean singleProducer;
+
+    /**
+     * Build G -> ME -> E without R1/R2 for externally risk-managed flow.
+     * Valid only with {@code RiskProcessingMode.MATCHING_ONLY}.
+     */
+    private final boolean directMatchingOnlyPipeline;
+
     /*
      * max number of messages not processed by R2 stage. Must be less than quarter of ringBufferSize.
      * Lower values, like 100, provide better mean latency.
@@ -100,6 +113,8 @@ public final class PerformanceConfiguration {
                 "ringBufferSize=" + ringBufferSize +
                 ", matchingEnginesNum=" + matchingEnginesNum +
                 ", riskEnginesNum=" + riskEnginesNum +
+                ", singleProducer=" + singleProducer +
+                ", directMatchingOnlyPipeline=" + directMatchingOnlyPipeline +
                 ", msgsInGroupLimit=" + msgsInGroupLimit +
                 ", maxGroupDurationNs=" + maxGroupDurationNs +
                 ", sendL2ForEveryCmd=" + sendL2ForEveryCmd +
@@ -119,6 +134,8 @@ public final class PerformanceConfiguration {
                 .ringBufferSize(16 * 1024)
                 .matchingEnginesNum(1)
                 .riskEnginesNum(1)
+                .singleProducer(false)
+                .directMatchingOnlyPipeline(false)
                 .msgsInGroupLimit(256)
                 .maxGroupDurationNs(10_000)
                 .sendL2ForEveryCmd(false)
@@ -135,6 +152,8 @@ public final class PerformanceConfiguration {
                 .ringBufferSize(2 * 1024)
                 .matchingEnginesNum(1)
                 .riskEnginesNum(1)
+                .singleProducer(false)
+                .directMatchingOnlyPipeline(false)
                 .msgsInGroupLimit(256)
                 .maxGroupDurationNs(10_000)
                 .sendL2ForEveryCmd(false)
@@ -151,6 +170,8 @@ public final class PerformanceConfiguration {
                 .ringBufferSize(64 * 1024)
                 .matchingEnginesNum(4)
                 .riskEnginesNum(2)
+                .singleProducer(false)
+                .directMatchingOnlyPipeline(false)
                 .msgsInGroupLimit(4_096)
                 .maxGroupDurationNs(4_000_000)
                 .sendL2ForEveryCmd(false)

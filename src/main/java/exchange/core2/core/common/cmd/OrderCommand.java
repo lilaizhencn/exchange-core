@@ -60,6 +60,12 @@ public final class OrderCommand implements IOrder {
 
     public int userCookie;
 
+    /**
+     * Transient caller correlation for allocation-light matcher submission.
+     * It is not part of matching state, journaling, snapshots or state hashes.
+     */
+    public long correlationId;
+
     // filled by grouping processor:
 
     public long eventsGroup;
