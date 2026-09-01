@@ -252,6 +252,21 @@ public final class MatchingEngineRouter implements WriteBytesMarshallable {
     }
 
 
+    public CommandResultCode registerSymbol(final CoreSymbolSpecification spec) {
+
+        if (spec == null || !symbolForThisHandler(spec.symbolId)) {
+            return CommandResultCode.MATCHING_INVALID_ORDER_BOOK_ID;
+        }
+
+        final IOrderBook existing = orderBooks.get(spec.symbolId);
+        if (existing != null) {
+            return CommandResultCode.SYMBOL_MGMT_SYMBOL_ALREADY_EXISTS;
+        }
+
+        addSymbol(spec);
+        return CommandResultCode.SUCCESS;
+    }
+
     private void addSymbol(final CoreSymbolSpecification spec) {
 
 //        log.debug("ME add symbolSpecification: {}", symbolSpecification);
