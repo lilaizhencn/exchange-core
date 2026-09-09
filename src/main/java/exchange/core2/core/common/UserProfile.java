@@ -115,6 +115,6 @@ public final class UserProfile implements WriteBytesMarshallable, StateHash {
                 HashingUtils.stateHash(positions),
                 adjustmentsCounter,
                 accounts.hashCode(),
-                userStatus.hashCode());
+                userStatus.getCode());
     }
 }

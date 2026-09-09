@@ -103,7 +103,7 @@ public final class Order implements WriteBytesMarshallable, IOrder {
 
     @Override
     public int hashCode() {
-        return Objects.hash(orderId, action, price, size, reserveBidPrice, filled,
+        return Objects.hash(orderId, action.getCode(), price, size, reserveBidPrice, filled,
                 //userCookie, timestamp
                 uid);
     }

@@ -67,7 +67,7 @@ public final class StateHashReportResult implements ReportResult {
     public int getStateHash() {
 
         final int[] hashes = hashCodes.entrySet().stream()
-                .mapToInt(e -> Objects.hash(e.getKey(), e.getValue())).toArray();
+                .mapToInt(e -> Objects.hash(e.getKey().moduleId, e.getKey().submodule.code, e.getValue())).toArray();
 
         return Arrays.hashCode(hashes);
     }

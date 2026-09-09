@@ -930,7 +930,7 @@ public final class OrderBookDirectImpl implements IOrderBook {
 
         @Override
         public int hashCode() {
-            return Objects.hash(orderId, action, price, size, reserveBidPrice, filled,
+            return Objects.hash(orderId, action.getCode(), price, size, reserveBidPrice, filled,
                     //userCookie,
                     uid);
         }
@@ -959,7 +959,7 @@ public final class OrderBookDirectImpl implements IOrderBook {
 
         @Override
         public int stateHash() {
-            return Objects.hash(orderId, action, price, size, reserveBidPrice, filled,
+            return Objects.hash(orderId, action.getCode(), price, size, reserveBidPrice, filled,
                     //userCookie,
                     uid);
         }
