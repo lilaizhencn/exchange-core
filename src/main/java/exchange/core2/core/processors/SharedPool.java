@@ -25,6 +25,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 public final class SharedPool {
 
     private final LinkedBlockingQueue<MatcherTradeEvent> eventChainsBuffer;
+    private final MatcherTradeEvent[] singleThreadChains;
+    private int singleThreadSize;
 
     @Getter
     private final int chainLength;
@@ -42,15 +44,32 @@ public final class SharedPool {
      */
     public SharedPool(final int poolMaxSize, final int poolInitialSize, final int chainLength) {
 
+        this(poolMaxSize, poolInitialSize, chainLength, false);
+    }
+
+    /** Creates a bounded event-chain pool for a caller that already enforces single-thread ownership. */
+    public static SharedPool createSingleThreadPool(
+            final int poolMaxSize,
+            final int poolInitialSize,
+            final int chainLength) {
+        return new SharedPool(poolMaxSize, poolInitialSize, chainLength, true);
+    }
+
+    private SharedPool(final int poolMaxSize, final int poolInitialSize,
+                       final int chainLength, final boolean singleThreaded) {
+
         if (poolInitialSize > poolMaxSize) {
             throw new IllegalArgumentException("too big poolInitialSize");
         }
 
-        this.eventChainsBuffer = new LinkedBlockingQueue<>(poolMaxSize);
+        this.eventChainsBuffer = singleThreaded ? null : new LinkedBlockingQueue<>(poolMaxSize);
+        this.singleThreadChains = singleThreaded ? new MatcherTradeEvent[poolMaxSize] : null;
         this.chainLength = chainLength;
 
         for (int i = 0; i < poolInitialSize; i++) {
-            this.eventChainsBuffer.add(MatcherTradeEvent.createEventChain(chainLength));
+            final MatcherTradeEvent chain = MatcherTradeEvent.createEventChain(chainLength);
+            if (singleThreaded) singleThreadChains[singleThreadSize++] = chain;
+            else eventChainsBuffer.add(chain);
         }
     }
 
@@ -61,7 +80,13 @@ public final class SharedPool {
      * @return chain, otherwise null
      */
     public MatcherTradeEvent getChain() {
-        MatcherTradeEvent poll = eventChainsBuffer.poll();
+        MatcherTradeEvent poll;
+        if (singleThreadChains != null) {
+            poll = singleThreadSize == 0 ? null : singleThreadChains[--singleThreadSize];
+            if (poll != null) singleThreadChains[singleThreadSize] = null;
+        } else {
+            poll = eventChainsBuffer.poll();
+        }
 //        log.debug("<<< POLL CHAIN HEAD  size={}", poll == null ? 0 : poll.getChainSize());
         if (poll == null) {
             poll = MatcherTradeEvent.createEventChain(chainLength);
@@ -77,6 +102,10 @@ public final class SharedPool {
      * @param head - pointer to the first element
      */
     public void putChain(MatcherTradeEvent head) {
+        if (singleThreadChains != null) {
+            if (singleThreadSize < singleThreadChains.length) singleThreadChains[singleThreadSize++] = head;
+            return;
+        }
         boolean offer = eventChainsBuffer.offer(head);
 //        log.debug(">>> OFFER CHAIN HEAD  size={} orrder={}", head.getChainSize(), offer);
     }

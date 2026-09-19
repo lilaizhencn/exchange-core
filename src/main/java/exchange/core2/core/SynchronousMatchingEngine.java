@@ -59,7 +59,7 @@ public final class SynchronousMatchingEngine implements AutoCloseable {
         }
         serializationProcessor = configuration.getSerializationCfg()
                 .getSerializationProcessorFactory().apply(configuration);
-        sharedPool = new SharedPool(EVENT_POOL_CHAINS, 8, EVENT_CHAIN_LENGTH);
+        sharedPool = SharedPool.createSingleThreadPool(EVENT_POOL_CHAINS, 8, EVENT_CHAIN_LENGTH);
         router = new MatchingEngineRouter(0, 1, serializationProcessor,
                 configuration.getPerformanceCfg().getOrderBookFactory(), sharedPool, configuration);
     }

@@ -38,4 +38,17 @@ class MatcherEventPoolingTest {
         assertEquals(0L, event.matchedOrderUid);
         assertNull(event.nextEvent);
     }
+
+    @Test
+    void singleThreadPoolReusesChainsWithoutQueueNodesAndKeepsItsBound() {
+        SharedPool pool = SharedPool.createSingleThreadPool(1, 1, 2);
+        MatcherTradeEvent initial = pool.getChain();
+        pool.putChain(initial);
+        assertEquals(initial, pool.getChain());
+
+        MatcherTradeEvent overflow = MatcherTradeEvent.createEventChain(2);
+        pool.putChain(initial);
+        pool.putChain(overflow);
+        assertEquals(initial, pool.getChain());
+    }
 }
