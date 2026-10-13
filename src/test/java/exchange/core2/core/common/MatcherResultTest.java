@@ -66,11 +66,14 @@ class MatcherResultTest {
         assertEquals(9, first.orderId());
         assertEquals(200, second.events().getFirst().price());
         assertThrows(UnsupportedOperationException.class, () -> first.events().clear());
+        var response = MatcherResult.commandSlot();
+        response.captureEvents(first.events());
         first.clearCommandSlot();
         event.price = 300;
         first.capture(3, command);
         org.junit.jupiter.api.Assertions.assertSame(firstEvent, first.events().getFirst());
         assertEquals(300, firstEvent.price());
+        assertEquals(100, response.events().getFirst().price());
         assertEquals(200, second.events().getFirst().price());
         first.capture(first);
         assertEquals(1, first.events().size());
@@ -95,4 +98,3 @@ class MatcherResultTest {
         assertThrows(IllegalStateException.class, stable::clearCommandSlot);
     }
 }
-

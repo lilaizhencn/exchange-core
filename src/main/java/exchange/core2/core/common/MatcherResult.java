@@ -99,6 +99,14 @@ public final class MatcherResult {
         for (int index = 0; index < source.events.size(); index++) eventSlots.append(source.events.get(index));
     }
 
+    /** Retain only events in a longer-lived response slot after a settlement slot retires. */
+    public void captureEvents(List<MatcherEvent> source) {
+        if (eventSlots == null) throw new IllegalStateException("matcher result is not a command slot");
+        if (source == events) return;
+        eventSlots.count = 0;
+        for (int index = 0; index < source.size(); index++) eventSlots.append(source.get(index));
+    }
+
     public void clearCommandSlot() {
         if (eventSlots == null) throw new IllegalStateException("cannot clear an immutable matcher result");
         eventSlots.count = 0;
