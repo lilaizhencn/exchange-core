@@ -292,3 +292,12 @@ Exchange-core is an open-source project and contributions are welcome!
 
 [license]:LICENSE.txt
 [license img]:https://img.shields.io/badge/License-Apache%202-blue.svg
+
+### 宿主命令槽位内的撮合结果复用
+
+`SynchronousMatchingEngine.placeInto/cancelInto` 将结果写入宿主传入的
+`MatcherResult.commandSlot()`，在归还原生成交链给 SharedPool 前复制 primitive 字段。
+每条在途命令、每个批量项以及改单的撤单阶段必须使用独立槽位；所有消费者完成后才允许
+`clearCommandSlot()` 和再次写入。稳定结果入口 `place/cancel/MatcherResult.from` 仍返回独立值，
+公开构造函数会脱离借用的成交槽位。普通撮合不再逐次分配结果列表、成交记录和捕获闭包。
+`MatcherResult` 与 `MatcherEvent` 为带同名访问器的类；使用反射的调用方不能再假设它们是 Java record。

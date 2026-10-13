@@ -106,6 +106,32 @@ public final class SynchronousMatchingEngine implements AutoCloseable {
         return execute();
     }
 
+    public MatcherResult placeInto(final MatcherResult target, final long timestamp, final long orderId,
+                                   final int userCookie, final long price, final long reservedBidPrice, final long size,
+                                   final OrderAction action, final OrderType orderType, final int symbol, final long uid) {
+        Objects.requireNonNull(target, "result slot");
+        prepare(OrderCommandType.PLACE_ORDER, timestamp, orderId, symbol, uid);
+        command.userCookie = userCookie; command.price = price; command.reserveBidPrice = reservedBidPrice;
+        command.size = size; command.action = Objects.requireNonNull(action); command.orderType = Objects.requireNonNull(orderType);
+        return executeInto(target);
+    }
+
+    public MatcherResult cancelInto(final MatcherResult target, final long timestamp, final long orderId,
+                                    final int symbol, final long uid) {
+        Objects.requireNonNull(target, "result slot");
+        prepare(OrderCommandType.CANCEL_ORDER, timestamp, orderId, symbol, uid);
+        return executeInto(target);
+    }
+
+    private MatcherResult executeInto(final MatcherResult target) {
+        final long currentSequence = sequence = Math.incrementExact(sequence);
+        router.processOrder(currentSequence, command);
+        target.capture(currentSequence, command);
+        recycleEvents();
+        command.marketData = null;
+        return target;
+    }
+
     public L2MarketData orderBook(final int symbol, final int depth) {
         prepare(OrderCommandType.ORDER_BOOK_REQUEST, 0, 0, symbol, 0);
         command.size = depth;

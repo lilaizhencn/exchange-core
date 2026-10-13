@@ -68,6 +68,25 @@ class SynchronousMatchingEngineTest {
         }
     }
 
+    @Test
+    void executesIntoSeparateHostSlotsBeforeNativeEventReuse() {
+        try (var engine = new SynchronousMatchingEngine(configuration())) {
+            engine.registerSymbol(SPECIFICATION);
+            var first = exchange.core2.core.common.MatcherResult.commandSlot();
+            var second = exchange.core2.core.common.MatcherResult.commandSlot();
+            engine.placeInto(first, 1, 201, 0, 100, 0, 5, OrderAction.ASK, OrderType.GTC, SYMBOL, 11);
+            engine.placeInto(second, 2, 202, 0, 100, 100, 2, OrderAction.BID, OrderType.IOC, SYMBOL, 12);
+            assertEquals(201, second.events().getFirst().matchedOrderId());
+            assertEquals(2, second.events().getFirst().size());
+            engine.cancelInto(first, 3, 201, SYMBOL, 11);
+            assertEquals(CommandResultCode.SUCCESS, first.resultCode());
+            assertEquals(3, first.events().getFirst().size());
+            assertEquals(2, second.events().getFirst().size());
+            assertEquals(2, second.sequence());
+            assertEquals(0, engine.openOrders().size());
+        }
+    }
+
     private static ExchangeConfiguration configuration() {
         return ExchangeConfiguration.defaultBuilder()
                 .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
