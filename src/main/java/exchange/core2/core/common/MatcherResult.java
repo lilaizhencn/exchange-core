@@ -55,6 +55,7 @@ public final class MatcherResult {
     }
 
     public static MatcherResult commandSlot() { return new MatcherResult(); }
+    public boolean isCommandSlot() { return eventSlots != null; }
 
     /** Copy before exchange-core returns its native event chain to SharedPool. */
     public void capture(long sequence, OrderCommand source) {

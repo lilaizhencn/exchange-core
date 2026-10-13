@@ -109,7 +109,7 @@ public final class SynchronousMatchingEngine implements AutoCloseable {
     public MatcherResult placeInto(final MatcherResult target, final long timestamp, final long orderId,
                                    final int userCookie, final long price, final long reservedBidPrice, final long size,
                                    final OrderAction action, final OrderType orderType, final int symbol, final long uid) {
-        Objects.requireNonNull(target, "result slot");
+        requireResultSlot(target);
         prepare(OrderCommandType.PLACE_ORDER, timestamp, orderId, symbol, uid);
         command.userCookie = userCookie; command.price = price; command.reserveBidPrice = reservedBidPrice;
         command.size = size; command.action = Objects.requireNonNull(action); command.orderType = Objects.requireNonNull(orderType);
@@ -118,9 +118,14 @@ public final class SynchronousMatchingEngine implements AutoCloseable {
 
     public MatcherResult cancelInto(final MatcherResult target, final long timestamp, final long orderId,
                                     final int symbol, final long uid) {
-        Objects.requireNonNull(target, "result slot");
+        requireResultSlot(target);
         prepare(OrderCommandType.CANCEL_ORDER, timestamp, orderId, symbol, uid);
         return executeInto(target);
+    }
+
+    private static void requireResultSlot(MatcherResult target) {
+        Objects.requireNonNull(target, "result slot");
+        if (!target.isCommandSlot()) throw new IllegalArgumentException("host result must be a command slot");
     }
 
     private MatcherResult executeInto(final MatcherResult target) {

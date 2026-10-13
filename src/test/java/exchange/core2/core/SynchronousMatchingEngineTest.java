@@ -87,6 +87,21 @@ class SynchronousMatchingEngineTest {
         }
     }
 
+    @Test
+    void rejectsAnImmutableTargetBeforeChangingTheOrderBook() {
+        try (var engine = new SynchronousMatchingEngine(configuration())) {
+            engine.registerSymbol(SPECIFICATION);
+            var stable = engine.place(1, 301, 0, 100, 0, 1, OrderAction.ASK, OrderType.GTC, SYMBOL, 11);
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+                    engine.cancelInto(stable, 2, 301, SYMBOL, 11));
+            assertEquals(1, engine.openOrders().size());
+            var target = exchange.core2.core.common.MatcherResult.commandSlot();
+            engine.cancelInto(target, 3, 301, SYMBOL, 11);
+            assertEquals(2, target.sequence());
+            assertEquals(0, engine.openOrders().size());
+        }
+    }
+
     private static ExchangeConfiguration configuration() {
         return ExchangeConfiguration.defaultBuilder()
                 .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
