@@ -94,10 +94,13 @@ public final class OrderBookNaiveImpl implements IOrderBook {
             case IOC:
                 newOrderMatchIoc(cmd);
                 break;
+            case FOK:
+                newOrderMatchFok(cmd);
+                break;
             case FOK_BUDGET:
                 newOrderMatchFokBudget(cmd);
                 break;
-            // TODO IOC_BUDGET and FOK support
+            // TODO IOC_BUDGET support
             default:
                 log.warn("Unsupported order type: {}", cmd);
                 eventsHelper.attachRejectEvent(cmd, cmd.size);
@@ -163,6 +166,20 @@ public final class OrderBookNaiveImpl implements IOrderBook {
             // was not matched completely - send reject for not-completed IoC order
             eventsHelper.attachRejectEvent(cmd, rejectedSize);
         }
+    }
+
+    private void newOrderMatchFok(final OrderCommand cmd) {
+        final SortedMap<Long, OrdersBucketNaive> matchingBuckets = subtreeForMatching(cmd.action, cmd.price);
+        long remaining = cmd.size;
+        // The price-bounded check leaves the book untouched unless the full size can fill.
+        for (final OrdersBucketNaive bucket : matchingBuckets.values()) {
+            if (remaining <= bucket.getTotalVolume()) {
+                tryMatchInstantly(cmd, matchingBuckets, 0, cmd);
+                return;
+            }
+            remaining -= bucket.getTotalVolume();
+        }
+        eventsHelper.attachRejectEvent(cmd, cmd.size);
     }
 
     private void newOrderMatchFokBudget(final OrderCommand cmd) {

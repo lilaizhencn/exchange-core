@@ -536,6 +536,66 @@ public abstract class OrderBookBaseTest {
         checkEventRejection(events.get(0), 25L, 400000L, MAX_PRICE + 1);
     }
 
+    @Test
+    public void shouldMatchFokBidWithinLimitInPriceTimeOrder() {
+        final OrderCommand cmd = OrderCommand.newOrder(FOK, 123, UID_2, 81600, MAX_PRICE, 175, BID);
+        processAndValidate(cmd, SUCCESS);
+        final List<MatcherTradeEvent> events = cmd.extractEvents();
+        assertEquals(3, events.size());
+        checkEventTrade(events.get(0), 2, 81599, 50);
+        checkEventTrade(events.get(1), 3, 81599, 25);
+        checkEventTrade(events.get(2), 1, 81600, 100);
+        assertTrue(events.get(2).activeOrderCompleted);
+        assertNull(orderBook.getOrderById(123));
+    }
+
+    @Test
+    public void shouldMatchFokAskWithinLimitInPriceTimeOrder() {
+        final OrderCommand cmd = OrderCommand.newOrder(FOK, 123, UID_2, 81590, 0, 61, ASK);
+        processAndValidate(cmd, SUCCESS);
+        final List<MatcherTradeEvent> events = cmd.extractEvents();
+        assertEquals(3, events.size());
+        checkEventTrade(events.get(0), 4, 81593, 40);
+        checkEventTrade(events.get(1), 5, 81590, 20);
+        checkEventTrade(events.get(2), 6, 81590, 1);
+        assertTrue(events.get(2).activeOrderCompleted);
+        assertNull(orderBook.getOrderById(123));
+    }
+
+    @Test
+    public void shouldRejectFokWithoutConsumingOrdersBeyondPriceLimit() {
+        final L2MarketData before = orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE);
+        final OrderCommand bid = OrderCommand.newOrder(FOK, 123, UID_2, 81600, MAX_PRICE, 176, BID);
+        processAndValidate(bid, SUCCESS);
+        assertEquals(before, orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE));
+        assertEquals(1, bid.extractEvents().size());
+        checkEventRejection(bid.extractEvents().get(0), 176, 81600, MAX_PRICE);
+        assertNull(orderBook.getOrderById(123));
+
+        final OrderCommand ask = OrderCommand.newOrder(FOK, 124, UID_2, 81590, 0, 62, ASK);
+        processAndValidate(ask, SUCCESS);
+        assertEquals(before, orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE));
+        assertEquals(1, ask.extractEvents().size());
+        checkEventRejection(ask.extractEvents().get(0), 62, 81590, 0L);
+        assertNull(orderBook.getOrderById(124));
+    }
+
+    @Test
+    public void shouldRejectFokWhenTheEntireOppositeBookIsInsufficient() {
+        final L2MarketData before = orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE);
+        final OrderCommand bid = OrderCommand.newOrder(FOK, 123, UID_2, MAX_PRICE, MAX_PRICE, 246, BID);
+        processAndValidate(bid, SUCCESS);
+        assertEquals(before, orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE));
+        assertEquals(1, bid.extractEvents().size());
+        checkEventRejection(bid.extractEvents().get(0), 246, MAX_PRICE, MAX_PRICE);
+
+        final OrderCommand ask = OrderCommand.newOrder(FOK, 124, UID_2, 1, 0, 97, ASK);
+        processAndValidate(ask, SUCCESS);
+        assertEquals(before, orderBook.getL2MarketDataSnapshot(Integer.MAX_VALUE));
+        assertEquals(1, ask.extractEvents().size());
+        checkEventRejection(ask.extractEvents().get(0), 97, 1, 0L);
+    }
+
     // ---------------------- FOK BUDGET ORDERS ---------------------------
 
     @Test

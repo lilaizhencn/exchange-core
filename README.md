@@ -65,7 +65,9 @@ Benchmark configuration:
 - Two different risk processing modes (specified per symbol): fully funded cash-market (currency pairs and equities) and margin-trade.
 - Maker/taker fees (defined in quote currency units).
 - Two order books implementations: simple implementation ("Naive") and performance implementation ("Direct").
-- Order types: Good-till-Crossing post-only (GTX), Immediate-or-Cancel (IOC), Good-till-Cancel (GTC), Fill-or-Kill Budget (FOK-B)
+- Order types: Good-till-Crossing post-only (GTX), Immediate-or-Cancel (IOC), Good-till-Cancel (GTC), price-limited Fill-or-Kill (FOK), Fill-or-Kill Budget (FOK-B)
+
+限价 FOK 由 `OrderBookDirectImpl.newOrderMatchFok` 和参考实现 `OrderBookNaiveImpl.newOrderMatchFok` 执行：在同一撮合线程内先检查限价范围内的对手方挂单数量，足量才按价格和时间顺序全部成交；不足则整单拒绝，不消耗挂单、不进入订单簿。FOK 的价格是单价上限或下限，与 FOK-B 的总预算语义分开。带明确保护价的市价 FOK 也使用这一原子成交路径。公共订单簿测试覆盖买卖足量、越界深度、全簿不足及 FIFO，并在 Direct/Naive 的 Equity、Margin、Exchange 三种规格执行。
 - Testing - unit-tests, integration tests, stress tests, integrity/consistency tests.
 - Low GC pressure, objects pooling, single ring-buffer.
 - Threads affinity (requires JNA).

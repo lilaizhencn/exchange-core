@@ -113,10 +113,13 @@ public final class OrderBookDirectImpl implements IOrderBook {
             case IOC:
                 newOrderMatchIoc(cmd);
                 break;
+            case FOK:
+                newOrderMatchFok(cmd);
+                break;
             case FOK_BUDGET:
                 newOrderMatchFokBudget(cmd);
                 break;
-            // TODO IOC_BUDGET and FOK support
+            // TODO IOC_BUDGET support
             default:
                 log.warn("Unsupported order type: {}", cmd);
                 eventsHelper.attachRejectEvent(cmd, cmd.size);
@@ -185,6 +188,22 @@ public final class OrderBookDirectImpl implements IOrderBook {
             // was not matched completely - send reject for not-completed IoC order
             eventsHelper.attachRejectEvent(cmd, rejectedSize);
         }
+    }
+
+    private void newOrderMatchFok(final OrderCommand cmd) {
+        DirectOrder maker = cmd.action == OrderAction.BID ? bestAskOrder : bestBidOrder;
+        long remaining = cmd.size;
+        // Check and match on the same owner thread, before changing any maker order.
+        while (maker != null && (cmd.action == OrderAction.BID ? maker.price <= cmd.price : maker.price >= cmd.price)) {
+            final Bucket bucket = maker.parent;
+            if (remaining <= bucket.volume) {
+                tryMatchInstantly(cmd, cmd);
+                return;
+            }
+            remaining -= bucket.volume;
+            maker = bucket.tail.prev;
+        }
+        eventsHelper.attachRejectEvent(cmd, cmd.size);
     }
 
     private void newOrderMatchFokBudget(final OrderCommand cmd) {
