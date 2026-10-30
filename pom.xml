@@ -4,7 +4,7 @@
 
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core</artifactId>
-    <version>0.5.18-emporia</version>
+    <version>0.5.19-emporia</version>
     <packaging>jar</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
@@ -46,20 +46,17 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <project.build.outputTimestamp>2026-08-16T00:00:00Z</project.build.outputTimestamp>
-        <java.version>25</java.version>
+        <java.version>27</java.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <maven.compiler.proc>full</maven.compiler.proc>
-        <jackson.version>3.1.4</jackson.version>
-        <junit.version>6.0.3</junit.version>
+        <spring-boot.version>4.1.2</spring-boot.version>
+        <!-- Aeron 1.54.0 gradle/libs.versions.toml -->
+        <agrona.version>2.7.0</agrona.version>
+        <hdrhistogram.version>2.2.2</hdrhistogram.version>
+        <lz4-java.version>1.11.4</lz4-java.version>
         <lombok.version>1.18.48</lombok.version>
         <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
         <maven.surefire.plugin.version>3.5.6</maven.surefire.plugin.version>
-        <mockito.version>5.23.0</mockito.version>
-        <slf4j.version>2.0.18</slf4j.version>
-        <logback.version>1.5.34</logback.version>
-        <commons-lang3.version>3.20.0</commons-lang3.version>
-        <postgresql.version>42.7.11</postgresql.version>
-        <testcontainers.version>2.0.5</testcontainers.version>
         <chronicle.bom.version>2026.18</chronicle.bom.version>
         <delombok.output>${project.build.directory}/delombok</delombok.output>
         <openhft.jvm.args>
@@ -78,16 +75,9 @@
     <dependencyManagement>
         <dependencies>
             <dependency>
-                <groupId>tools.jackson</groupId>
-                <artifactId>jackson-bom</artifactId>
-                <version>${jackson.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.junit</groupId>
-                <artifactId>junit-bom</artifactId>
-                <version>${junit.version}</version>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -138,7 +128,6 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>${slf4j.version}</version>
         </dependency>
 
         <!-- Emporia HTTP adapter JSON codec -->
@@ -174,7 +163,7 @@
         <dependency>
             <groupId>org.agrona</groupId>
             <artifactId>agrona</artifactId>
-            <version>1.15.1</version>
+            <version>${agrona.version}</version>
         </dependency>
 
         <!-- Eclipse (Goldman Sachs) collections -->
@@ -192,9 +181,9 @@
 
         <!-- lz4-java -->
         <dependency>
-            <groupId>org.lz4</groupId>
+            <groupId>at.yawk.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.8.0</version>
+            <version>${lz4-java.version}</version>
         </dependency>
 
         <!-- test scope -->
@@ -213,7 +202,6 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-junit-jupiter</artifactId>
-            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
 
@@ -221,14 +209,13 @@
         <dependency>
             <groupId>org.hdrhistogram</groupId>
             <artifactId>HdrHistogram</artifactId>
-            <version>2.1.12</version>
+            <version>${hdrhistogram.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
-            <version>${logback.version}</version>
             <scope>test</scope>
             <exclusions>
                 <exclusion>
@@ -266,7 +253,6 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>${commons-lang3.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -285,31 +271,26 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <version>${postgresql.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-junit-jupiter</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.hamcrest</groupId>
-            <artifactId>hamcrest-library</artifactId>
-            <version>1.3</version>
+            <artifactId>hamcrest</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -87,14 +87,32 @@ ordering, runtime metrics and JMH benchmarks.
 <dependency>
     <groupId>exchange.core2</groupId>
     <artifactId>exchange-core</artifactId>
-    <version>0.5.15-emporia</version>
+    <version>0.5.19-emporia</version>
 </dependency>
 ```
 
-Emporia releases must be built from a clean Git worktree. Maven compiles and packages an immutable `git archive`
-of that commit, rejects source changes observed after packaging, and records the exact source commit in
-`META-INF/surprising-exchange-core.properties`. The consuming Surprising EX build verifies that provenance and the
-whole-JAR SHA-256 before compiling the Aeron service.
+Emporia 版本使用 HotSpot JDK 27 构建，必须保持 Git 工作区干净。Maven 编译并打包该提交的
+`git archive`，打包后再次检查工作区与提交未变化，并在
+`META-INF/surprising-exchange-core.properties` 中记录源码提交和干净状态。
+
+`0.5.19-emporia` 与 Surprising EX 使用相同的依赖基线：
+
+| 依赖 | 版本来源与版本 |
+| --- | --- |
+| Agrona / HdrHistogram | [Aeron 1.54.0 版本清单](https://github.com/aeron-io/aeron/blob/1.54.0/gradle/libs.versions.toml)：2.7.0 / 2.2.2 |
+| Jackson / SLF4J / Logback | Spring Boot 4.1.2 BOM：3.1.7 / 2.0.20 / 1.5.38 |
+| JUnit / Mockito / Hamcrest | Spring Boot 4.1.2 BOM：6.0.3 / 5.23.0 / 3.0 |
+| PostgreSQL / Testcontainers / Commons Lang | Spring Boot 4.1.2 BOM：42.7.14 / 2.0.5 / 3.20.0 |
+| LZ4 | 与 Surprising EX 一致：`at.yawk.lz4:lz4-java:1.11.4`，保留 `net.jpountz` 包名 |
+| Chronicle BOM / Lombok | 与 Surprising EX 一致：2026.18 / 1.18.48 |
+
+Spring Boot 只作为依赖管理 BOM 导入，不增加 Spring 运行时依赖。Aeron 的构建和测试依赖不用于覆盖
+Spring Boot 的 Jackson/JUnit 基线；没有共同版本约束的 Disruptor、Eclipse Collections 等依赖保持原版本。
+
+依赖升级验证（2026-10-30，HotSpot Corretto 27 / Maven 3.9.16）：干净的候选提交执行
+`mvn -o -B -ntp clean verify`，338 项测试通过，无失败、错误或跳过；覆盖 Direct/Naive 三种订单簿规格、
+FOK 原子成交、资金核对、快照及 GTX 日志恢复。有效 POM 中 17 项共享依赖与 Surprising EX 管理版本一致。
+未执行 `postgres-it`、额外的 `it` 配置、压测或 JMH，也未验证升级前的生产快照文件。
 
 Alternatively, you can clone this repository and run the [example test](https://github.com/mzheravin/exchange-core/tree/master/src/test/java/exchange/core2/tests/examples/ITCoreExample.java).
 
